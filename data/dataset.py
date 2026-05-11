@@ -1,0 +1,73 @@
+import numpy as np
+import os
+import glob
+import cv2
+import torch.utils.data as data
+
+def np_load_frame(filename, resize_height, resize_width):
+    """
+    Load image path and convert it to numpy.ndarray.
+    """
+    image_decoded = cv2.imread(filename)
+    h, w, _ = image_decoded.shape
+    image_resized = cv2.resize(image_decoded, (resize_width, resize_height))
+    image_resized = image_resized.astype(dtype=np.float32)
+    image_resized = (image_resized / 127.5) - 1.0
+    return image_resized, h, w
+
+class DataLoader(data.Dataset):
+    def __init__(self, video_folder, transform, resize_height, resize_width, time_step=4, num_pred=1, label_map=None):
+        self.dir = video_folder
+        self.transform = transform
+        self.video_frames = []
+        self._resize_height = resize_height
+        self._resize_width = resize_width
+        self._time_step = time_step
+        self._num_pred = num_pred
+        self.index_samples = []
+        
+        # Gán tham số label_map
+        self.label_map = label_map
+        
+        self.setup()
+
+    def setup(self):
+        videos = glob.glob(os.path.join(self.dir, '*'))
+        videos.sort()
+        if os.path.isdir(videos[0]):
+            all_video_frames = []
+            for video in videos:
+                vide_frames = glob.glob(os.path.join(video, '*.jpg'))
+                vide_frames.sort(key=lambda x: int(os.path.basename(x).split('.')[0].split('_')[-1]))
+                if len(all_video_frames) == 0:
+                    all_video_frames = vide_frames
+                else:
+                    all_video_frames += vide_frames
+        else:
+            videos.sort(key=lambda x: int(os.path.basename(x).split('.')[0].split('_')[-1]))
+            all_video_frames = videos
+        
+        self.video_frames = all_video_frames
+        self.index_samples = list(range(len(all_video_frames)-self._time_step))
+
+    def __getitem__(self, index):
+        frame_index = self.index_samples[index]
+        batch_frames_512 = np.zeros((self._time_step+self._num_pred, 3, 256, 256))
+        batch_frames = np.zeros((self._time_step+self._num_pred, 3, self._resize_width, self._resize_height))
+
+        for i in range(self._time_step + self._num_pred):
+            image_512, h, w = np_load_frame(self.video_frames[frame_index + i], 256, 256)
+            image, h, w = np_load_frame(self.video_frames[frame_index + i], self._resize_height,
+                                  self._resize_width)
+
+            if self.transform is not None:
+                batch_frames_512[i] = self.transform(image_512)
+                batch_frames[i] = self.transform(image)
+            
+        return {
+            '256': batch_frames_512,
+            'standard': batch_frames
+        }
+
+    def __len__(self):
+        return len(self.index_samples)

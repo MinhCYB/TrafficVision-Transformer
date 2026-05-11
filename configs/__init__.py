@@ -1,114 +1,38 @@
-import argparse
-from models.utils import process_config
-
-
-def get_eval_config():
-    parser = argparse.ArgumentParser("Visual Transformer Evaluation")
-
-    # basic config
-    parser.add_argument("--n-gpu", type=int, default=1, help="number of gpus to use")
-    parser.add_argument("--model-arch", type=str, default="b16", help='model setting to use', choices=['b16', 'b32', 'l16', 'l32', 'h14'])
-    parser.add_argument("--checkpoint-path", type=str, default=None, help="model checkpoint to load weights")
-    parser.add_argument("--image-size", type=int, default=384, help="input image size", choices=[224, 384])
-    parser.add_argument("--batch-size", type=int, default=4, help="batch size")
-    parser.add_argument("--num-workers", type=int, default=8, help="number of workers")
-    parser.add_argument("--data-dir", type=str, default='../data', help='data folder')
-    parser.add_argument("--dataset", type=str, default='ImageNet', help="dataset for fine-tunning/evaluation")
-    parser.add_argument("--num-classes", type=int, default=1000, help="number of classes in dataset")
-    config = parser.parse_args()
-
-    # model config
-    config = eval("get_{}_config".format(config.model_arch))(config)
-
-    print_config(config)
-    return config
-
-def get_train_config():
-    parser = argparse.ArgumentParser("Visual Transformer Train/Fine-tune")
-
-    # basic config
-    parser.add_argument("--exp-name", type=str, default="ft", help="experiment name")
-    parser.add_argument("--train", type=int, default=0, help="train or not")
-    parser.add_argument("--n-gpu", type=int, default=1, help="number of gpus to use")
-    parser.add_argument("--tensorboard", default=False, action='store_true', help='flag of turnning on tensorboard')
-    parser.add_argument("--model-arch", type=str, default="b16", help='model setting to use', choices=['b16', 'b32', 'l16', 'l32', 'h14'])
-    parser.add_argument("--checkpoint-path", type=str, default="./experiments_andt_ADrone_STE_TTE/checkpoints/best.pth", help="model checkpoint to load weights")
-    parser.add_argument("--image-size", type=int, default=384, help="input image size", choices=[224, 384, 256])
-    parser.add_argument("--batch-size", type=int, default=8, help="batch size")
-    parser.add_argument("--num-frames", type=int, default=4, help="number of frames")
-    parser.add_argument("--num-workers", type=int, default=1, help="number of workers")
-    parser.add_argument("--train-steps", type=int, default=38000, help="number of training/fine-tunning steps")
-    parser.add_argument("--epochs", type=int, default=5, help="number of training/fine-tunning epochs")
-    parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
-    parser.add_argument("--wd", type=float, default=1e-4, help='weight decay')
-    parser.add_argument("--warmup-steps", type=int, default=500, help='learning rate warm up steps')
-    parser.add_argument("--data-dir", type=str, default='../data', help='data folder')
-    parser.add_argument("--dataset", type=str, default='ImageNet', help="dataset for fine-tunning/evaluation")
-    parser.add_argument("--num-classes", type=int, default=25, help="number of classes in dataset")
-    config = parser.parse_args()
-
-    # model config
-    config = eval("get_{}_config".format(config.model_arch))(config)
-    process_config(config)
-    print_config(config)
-    return config
-
-
-def get_b16_config(config):
-    """ ViT-B/16 configuration """
-    config.patch_size = 16
-    config.emb_dim = 768
-    config.mlp_dim = 1536
-    config.num_heads = 6
-    config.num_layers = 2
-    config.attn_dropout_rate = 0.0
-    config.dropout_rate = 0.1
-    return config
-
-
-def get_b32_config(config):
-    """ ViT-B/32 configuration """
-    config = get_b16_config(config)
-    config.patch_size = 32
-    return config
-
-
-def get_l16_config(config):
-    """ ViT-L/16 configuration """
-    config.patch_size = 16
-    config.emb_dim = 1024
-    config.mlp_dim = 4096
-    config.num_heads = 16
-    config.num_layers = 24
-    config.attn_dropout_rate = 0.0
-    config.dropout_rate = 0.1
-    return config
-
-
-def get_l32_config(config):
-    """ Vit-L/32 configuration """
-    config = get_l16_config(config)
-    config.patch_size = 32
-    return config
-
-
-def get_h14_config(config):
-    """  ViT-H/14 configuration """
-    config.patch_size = 14
-    config.emb_dim = 1280
-    config.mlp_dim = 5120
-    config.num_heads = 16
-    config.num_layers = 32
-    config.attn_dropout_rate = 0.0
-    config.dropout_rate = 0.1
-    return config
-
+import os
+from .train_config import get_train_args, get_eval_args
+from . import model_config
 
 def print_config(config):
-    message = ''
-    message += '----------------- Config ---------------\n'
+    message = '\n' + '='*20 + ' CONFIGURATION ' + '='*20 + '\n'
     for k, v in sorted(vars(config).items()):
-        comment = ''
-        message += '{:>35}: {:<30}{}\n'.format(str(k), str(v), comment)
-    message += '----------------- End -------------------'
+        message += f'{k:>25}: {v:<30}\n'
+    message += '='*55 + '\n'
     print(message)
+
+def setup_output_dirs(exp_name):
+    """Tự động tạo cấu trúc thư mục lưu trữ cho experiment"""
+    base_dir = os.path.join("outputs", exp_name)
+    dirs_to_make = [
+        os.path.join(base_dir, "checkpoints"),
+        os.path.join(base_dir, "logs"),
+        os.path.join(base_dir, "predictions")
+    ]
+    for d in dirs_to_make:
+        os.makedirs(d, exist_ok=True)
+    print(f"[*] Đã tự động khởi tạo cấu trúc thư mục tại: {base_dir}")
+
+def get_train_config():
+    config = get_train_args()
+    config = getattr(model_config, f"get_{config.model_arch}_config")(config)
+    
+    # Gọi hàm tự động tạo thư mục output dựa theo tên experiment
+    setup_output_dirs(config.exp_name)
+    
+    print_config(config)
+    return config
+
+def get_eval_config():
+    config = get_eval_args()
+    config = getattr(model_config, f"get_{config.model_arch}_config")(config)
+    print_config(config)
+    return config
