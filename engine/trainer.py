@@ -9,6 +9,9 @@ import torchvision.transforms as transforms
 # from checkpoint import load_checkpoint
 # from data_loaders import *
 from models.utils import setup_device, accuracy, MetricTracker, TensorboardWriter
+
+# Anomaly score: higher MSE = more anomalous
+loss_func_mse = nn.MSELoss(reduction='mean')
 # from data_utils import DataLoader
 from sklearn.metrics import *
 import torch.utils.data as data
@@ -40,30 +43,27 @@ def train_epoch(epoch, model, data_loader, criterion, optimizer, lr_scheduler, m
     return metrics.result()
 
 def valid_epoch(epoch, model, data_loader, criterion, metrics, device=torch.device('cpu')):
+    """
+    Validate using MSE as anomaly score.
+    Higher MSE → more anomalous → higher AUC-ROC = better model.
+    """
     metrics.reset()
     losses = []
-    acc1s = []
-    acc5s = []
-    # validation loop
     new_label = np.load('../../UIT-ADrone/test/test_frame_mask/DJI_0073.npy')
 
     with torch.no_grad():
         for batch_idx, (batch_data) in enumerate(data_loader):
             batch_data_256, batch_data = batch_data['256'].to(device), batch_data['standard'].to(device)
-            # batch_target = batch_target.to(device)
-            batch_pred = model(batch_data[:,:4])
-            loss = loss_func_mse(batch_data_256[:,4].float(), batch_pred)
+            batch_pred = model(batch_data[:, :4])
+            loss = loss_func_mse(batch_data_256[:, 4].float(), batch_pred)
             losses.append(loss.item())
 
-    loss = np.mean(losses)
+    mean_loss = np.mean(losses)
     frame_auc = roc_auc_score(y_true=new_label[:len(losses)], y_score=losses)
-    acc1 = np.mean(acc1s)
-    acc5 = np.mean(acc5s)
     metrics.writer.set_step(epoch, 'valid')
-    metrics.update('loss', loss)
-    metrics.update('acc1', frame_auc)
-    # metrics.update('acc5', acc5)
-    print("Test Epoch: {:03d}), AUC@1: {:.2f}".format(epoch, frame_auc))
+    metrics.update('loss', mean_loss)
+    metrics.update('auc', frame_auc)
+    print("Val Epoch {:03d} | Loss: {:.4f} | AUC: {:.4f}".format(epoch, mean_loss, frame_auc))
     return metrics.result()
 
 from tqdm import tqdm

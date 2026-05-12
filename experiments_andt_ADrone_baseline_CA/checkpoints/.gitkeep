@@ -1,0 +1,3 @@
+# Folder này chứa checkpoint của Baseline CA model sau khi train xong.
+# File .npy anomaly scores cũng được lưu ở đây sau khi chạy inference.
+# ĐỪNG XÓA các file .npy sau khi test xong — cần để tính AUC và vẽ ROC.
