@@ -16,6 +16,22 @@ def np_load_frame(filename, resize_height, resize_width):
     return image_resized, h, w
 
 class DataLoader(data.Dataset):
+    """Dataset for loading video frames and returning two resolutions.
+
+    Args:
+        video_folder: Root folder containing frames or subfolders of frames.
+        transform: Callable applied to each frame (expects CHW tensors).
+        resize_height: Target height for standard frames.
+        resize_width: Target width for standard frames.
+        time_step: Number of input frames per sample.
+        num_pred: Number of prediction frames per sample.
+        label_map: Optional label mapping for supervised/label-aware use.
+
+    Returns:
+        dict with keys:
+            "256": np.ndarray, shape (time_step + num_pred, 3, 256, 256)
+            "standard": np.ndarray, shape (time_step + num_pred, 3, resize_height, resize_width)
+    """
     def __init__(self, video_folder, transform, resize_height, resize_width, time_step=4, num_pred=1, label_map=None):
         self.dir = video_folder
         self.transform = transform
@@ -53,7 +69,7 @@ class DataLoader(data.Dataset):
     def __getitem__(self, index):
         frame_index = self.index_samples[index]
         batch_frames_512 = np.zeros((self._time_step+self._num_pred, 3, 256, 256))
-        batch_frames = np.zeros((self._time_step+self._num_pred, 3, self._resize_width, self._resize_height))
+        batch_frames = np.zeros((self._time_step+self._num_pred, 3, self._resize_height, self._resize_width))
 
         for i in range(self._time_step + self._num_pred):
             image_512, h, w = np_load_frame(self.video_frames[frame_index + i], 256, 256)
