@@ -62,6 +62,22 @@ def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, dev
         if batch_idx % 100 == 0:
             print("Train Epoch: {:03d} Batch: {:05d}/{:05d} Reconstruction Loss: {:.4f}"
                   .format(epoch, batch_idx, len(data_loader), np.mean(average_loss)))
+                # AUTO SAVE mỗi 500 batch
+        if batch_idx % 500 == 0 and batch_idx > 0:
+            save_path = os.path.join(
+                SAVE_PATH,
+                'checkpoints',
+                f'batch_{batch_idx}.pth'
+            )
+
+            torch.save({
+                'epoch': epoch,
+                'batch_idx': batch_idx,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+            }, save_path)
+
+            print(f"\n✅ Auto-saved checkpoint: {save_path}")
 
     return metrics.result()
 
