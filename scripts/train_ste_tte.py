@@ -253,7 +253,7 @@ def main():
         loaded_epoch = checkpoint.get('epoch', 1)
         loaded_batch = checkpoint.get('batch_idx', 0)
     
-        start_epoch = loaded_epoch + 1
+        start_epoch = loaded_epoch
         global_batch_offset = loaded_batch
     
         print(
