@@ -205,6 +205,19 @@ def main():
     )
     model = model.to(device)
 
+    # Resume checkpoint nếu tồn tại
+    if os.path.exists(config.checkpoint_path):
+        print(f"Loading checkpoint: {config.checkpoint_path}")
+    
+        checkpoint = torch.load(config.checkpoint_path, map_location=device)
+    
+        model.load_state_dict(checkpoint['state_dict'])
+    
+        loaded_epoch = checkpoint.get('epoch', 0)
+        loaded_batch = checkpoint.get('batch_idx', 0)
+    
+        print(f"✅ Resumed from epoch {loaded_epoch}, batch {loaded_batch}")
+
     ckpt_dir = os.path.join(SAVE_PATH, 'checkpoints')
     os.makedirs(ckpt_dir, exist_ok=True)
 
