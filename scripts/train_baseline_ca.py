@@ -26,7 +26,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Anomaly score: higher MSE = more anomalous
 loss_func_mse = nn.MSELoss(reduction='mean')
-SAVE_PATH = 'experiments_andt_ADrone_baseline_CA/'
+SAVE_PATH = '/content/drive/MyDrive/TrafficVision/experiments_andt_ADrone_baseline_CA/'
 
 
 def normalize_scores(scores):
@@ -55,10 +55,11 @@ def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, dev
     return metrics.result()
 
 
-def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
+def valid_epoch(epoch, model, data_loader, metrics, config, device=torch.device('cpu')):
     metrics.reset()
     losses = []
-    new_label = np.load('../../UIT-ADrone/test/test_frame_mask/DJI_0073.npy')
+    label_path = os.path.join(config.data_dir, 'test/test_frame_mask/DJI_0073.npy')
+    new_label = np.load(label_path)
     with torch.no_grad():
         for batch_data in data_loader:
             batch_data_256 = batch_data['256'].to(device)
@@ -169,7 +170,7 @@ def main():
             result = train_epoch(epoch, model, train_batch, optimizer, lr_scheduler, train_metrics, device)
             log.update(result)
             model.eval()
-            result = valid_epoch(epoch, model, test_batch, valid_metrics, device)
+            result = valid_epoch(epoch, model, test_batch, valid_metrics, config, device)
             log.update(**{'val_' + k: v for k, v in result.items()})
             best = log['val_auc'] > best_auc
             if best:

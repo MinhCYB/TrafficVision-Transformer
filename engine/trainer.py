@@ -42,14 +42,15 @@ def train_epoch(epoch, model, data_loader, criterion, optimizer, lr_scheduler, m
                     .format(epoch, batch_idx, len(data_loader), np.mean(average_loss)))
     return metrics.result()
 
-def valid_epoch(epoch, model, data_loader, criterion, metrics, device=torch.device('cpu')):
+def valid_epoch(epoch, model, data_loader, criterion, metrics, config, device=torch.device('cpu')):
     """
     Validate using MSE as anomaly score.
     Higher MSE → more anomalous → higher AUC-ROC = better model.
     """
     metrics.reset()
     losses = []
-    new_label = np.load('../../UIT-ADrone/test/test_frame_mask/DJI_0073.npy')
+    label_path = os.path.join(config.data_dir, 'test/test_frame_mask/DJI_0073.npy')
+    new_label = np.load(label_path)
 
     with torch.no_grad():
         for batch_idx, (batch_data) in enumerate(data_loader):
