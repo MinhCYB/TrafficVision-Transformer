@@ -85,7 +85,7 @@ def train_epoch(
                 .format(
                     epoch,
                     batch_idx,
-                    global_batch_offset + len(data_loader),
+                    len(data_loader),
                     np.mean(average_loss)
                 )
             )
