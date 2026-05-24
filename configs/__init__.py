@@ -1,5 +1,5 @@
 import os
-from .train_config import get_train_args, get_eval_args
+from .train_config import get_train_config, get_eval_config
 from . import model_config
 
 def print_config(config):

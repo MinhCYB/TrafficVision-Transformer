@@ -8,6 +8,9 @@ from torchvision.models._utils import IntermediateLayerGetter
 import torch.distributed as dist
 import timm
 
+# Model Baseline CA: dùng 1 transformer duy nhất xử lý tất cả frames gộp lại.
+# Khác STE-TTE ở chỗ: có module CrossAttention riêng — CLS token attend lên toàn bộ patches.
+
 def is_dist_avail_and_initialized():
     if not dist.is_available():
         return False
@@ -358,7 +361,7 @@ class VisionTransformer(nn.Module):
         self.cross_att = CrossAttention(768, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.)
 
     def forward(self, x): # x: (b, n, c, h, w)
-        x = x.float().cuda()
+        x = x.float()
         # import pdb; pdb.set_trace()
         for i in range(x.shape[1]):
             emb = self.embedding(x[:, i])

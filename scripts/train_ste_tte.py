@@ -40,28 +40,74 @@ def normalize_scores(scores):
     return (scores - scores.min()) / (scores.max() - scores.min() + 1e-8)
 
 
-def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, device=torch.device('cpu')):
+def train_epoch(
+    epoch,
+    model,
+    data_loader,
+    optimizer,
+    lr_scheduler,
+    metrics,
+    global_batch_offset=0,
+    device=torch.device('cpu')
+):
     metrics.reset()
     average_loss = []
 
-    for batch_idx, batch_data in enumerate(data_loader):
+    for local_batch_idx, batch_data in enumerate(data_loader):
+
+        batch_idx = global_batch_offset + local_batch_idx
+
         batch_data_256 = batch_data['256'].to(device)
         batch_data_std = batch_data['standard'].to(device)
 
         optimizer.zero_grad()
+
         batch_pred = model(batch_data_std[:, :4])
-        loss = loss_func_mse(batch_data_256[:, 4].float(), batch_pred)
+
+        loss = loss_func_mse(
+            batch_data_256[:, 4].float(),
+            batch_pred
+        )
+
         loss.backward()
+
         optimizer.step()
         lr_scheduler.step()
 
-        metrics.writer.set_step((epoch - 1) * len(data_loader) + batch_idx)
+        metrics.writer.set_step(batch_idx)
+
         metrics.update('loss', loss.item())
         average_loss.append(loss.item())
 
         if batch_idx % 100 == 0:
-            print("Train Epoch: {:03d} Batch: {:05d}/{:05d} Reconstruction Loss: {:.4f}"
-                  .format(epoch, batch_idx, len(data_loader), np.mean(average_loss)))
+            print(
+                "Train Epoch: {:03d} Batch: {:05d}/{:05d} Reconstruction Loss: {:.4f}"
+                .format(
+                    epoch,
+                    batch_idx,
+                    len(data_loader),
+                    np.mean(average_loss)
+                )
+            )
+
+        # AUTO SAVE mỗi 500 batch GLOBAL
+        if batch_idx % 500 == 0 and batch_idx > 0:
+
+            save_path = os.path.join(
+                SAVE_PATH,
+                'checkpoints',
+                f'batch_{batch_idx}.pth'
+            )
+
+            torch.save({
+                'epoch': epoch,
+                'batch_idx': batch_idx,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+            }, save_path)
+
+            print(f"\n✅ Auto-saved checkpoint: {save_path}")
 
     return metrics.result()
 
@@ -189,6 +235,32 @@ def main():
     )
     model = model.to(device)
 
+   # Resume checkpoint nếu tồn tại
+    start_epoch = 1
+    global_batch_offset = 0
+    
+    if os.path.exists(config.checkpoint_path):
+    
+        print(f"Loading checkpoint: {config.checkpoint_path}")
+    
+        checkpoint = torch.load(
+            config.checkpoint_path,
+            map_location=device
+        )
+    
+        model.load_state_dict(checkpoint['state_dict'])
+    
+        loaded_epoch = checkpoint.get('epoch', 1)
+        loaded_batch = checkpoint.get('batch_idx', 0)
+    
+        start_epoch = loaded_epoch
+        global_batch_offset = loaded_batch
+    
+        print(
+            f"✅ Resumed from epoch {loaded_epoch}, "
+            f"batch {loaded_batch}"
+        )
+
     ckpt_dir = os.path.join(SAVE_PATH, 'checkpoints')
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -223,6 +295,21 @@ def main():
             pct_start=config.warmup_steps / config.train_steps,
             total_steps=config.train_steps
         )
+        # Resume optimizer + scheduler
+        if os.path.exists(config.checkpoint_path):
+        
+            checkpoint = torch.load(
+                config.checkpoint_path,
+                map_location=device
+            )
+        
+            if 'optimizer' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer'])
+        
+            if 'lr_scheduler' in checkpoint:
+                lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        
+            print("✅ Optimizer + Scheduler resumed")
 
         # Training loop
         print("Start training...")
@@ -230,11 +317,20 @@ def main():
         log = {'val_auc': 0}
         log_file = open('training_log_ste_tte.txt', 'w')
 
-        for epoch in range(1, config.epochs + 1):
+        for epoch in range(start_epoch, start_epoch + config.epochs):
             log['epoch'] = epoch
 
             model.train()
-            result = train_epoch(epoch, model, train_batch, optimizer, lr_scheduler, train_metrics, device)
+            result = train_epoch(
+                epoch,
+                model,
+                train_batch,
+                optimizer,
+                lr_scheduler,
+                train_metrics,
+                global_batch_offset=global_batch_offset,
+                device=device
+            )
             log.update(result)
 
             model.eval()
