@@ -101,7 +101,7 @@ def test_all_scenes(model, test_path, config, device=None):
     Load best checkpoint và chạy inference trên toàn bộ test scenes.
     Saves .npy anomaly score files vào SAVE_PATH để dùng với compute_auc.py.
     """
-    path_ckpt = os.path.join(SAVE_PATH, 'checkpoints/best.pth')
+    path_ckpt = config.checkpoint_path
     checkpoint = torch.load(path_ckpt)
     print('Path checkpoint:', path_ckpt)
     model.load_state_dict(checkpoint['state_dict'])
