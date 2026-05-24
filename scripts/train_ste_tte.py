@@ -308,8 +308,8 @@ def main():
             if 'optimizer' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer'])
         
-            if 'lr_scheduler' in checkpoint:
-                lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            # if 'lr_scheduler' in checkpoint:
+            #     lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         
             print("✅ Optimizer + Scheduler resumed")
 
