@@ -183,7 +183,7 @@ def test_all_scenes(model, test_path, config, device=None):
         list_np_labels.append(np_label[len(np_label) - len(losses_curr_video):])
         np.save(os.path.join(SAVE_PATH, scene_name + '.npy'), np.array(losses_curr_video))
 
-        if idx_video >= 3: break
+        if idx_video >= 1: break
 
     list_np_labels = np.concatenate(list_np_labels)
 
