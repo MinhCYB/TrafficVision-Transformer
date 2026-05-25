@@ -34,10 +34,13 @@ def normalize_scores(scores):
     return (scores - scores.min()) / (scores.max() - scores.min() + 1e-8)
 
 
-def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, device=torch.device('cpu')):
+def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, ckpt_dir, current_start_batch=0, device=torch.device('cpu')):
     metrics.reset()
     average_loss = []
     for batch_idx, batch_data in enumerate(data_loader):
+        # Bỏ qua batch đã chạy khi resume
+        if batch_idx <= current_start_batch and current_start_batch > 0:
+            continue
         batch_data_256 = batch_data['256'].to(device)
         batch_data_std = batch_data['standard'].to(device)
         optimizer.zero_grad()
@@ -52,6 +55,17 @@ def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, dev
         if batch_idx % 100 == 0:
             print("Train Epoch: {:03d} Batch: {:05d}/{:05d} Loss: {:.4f}"
                   .format(epoch, batch_idx, len(data_loader), np.mean(average_loss)))
+        # Lưu resume checkpoint mỗi 500 batch
+        if batch_idx % 500 == 0 and batch_idx > 0:
+            os.makedirs(ckpt_dir, exist_ok=True)
+            torch.save({
+                'epoch': epoch,
+                'batch': batch_idx,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+            }, os.path.join(ckpt_dir, 'resume.pth'))
+            print(f'Đã lưu resume.pth tại epoch {epoch}, batch {batch_idx}')
     return metrics.result()
 
 
@@ -164,10 +178,27 @@ def main():
         log = {'val_auc': 0}
         log_file = open('training_log_baseline.txt', 'w')
 
+        # Load resume checkpoint nếu có
+        resume_path = os.path.join(ckpt_dir, 'resume.pth')
+        start_epoch = 1
+        start_batch = 0
+        if os.path.exists(resume_path):
+            ckpt = torch.load(resume_path, map_location=device)
+            model.load_state_dict(ckpt['state_dict'])
+            optimizer.load_state_dict(ckpt['optimizer'])
+            lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
+            start_epoch = ckpt['epoch']
+            start_batch = ckpt['batch']
+            print(f'Resume từ epoch {start_epoch}, batch {start_batch}')
+
         for epoch in range(1, config.epochs + 1):
+            if epoch < start_epoch:
+                continue
+            current_start_batch = start_batch if epoch == start_epoch else 0
             log['epoch'] = epoch
             model.train()
-            result = train_epoch(epoch, model, train_batch, optimizer, lr_scheduler, train_metrics, device)
+            result = train_epoch(epoch, model, train_batch, optimizer, lr_scheduler,
+                                 train_metrics, ckpt_dir, current_start_batch, device)
             log.update(result)
             model.eval()
             result = valid_epoch(epoch, model, test_batch, valid_metrics, config, device)

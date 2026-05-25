@@ -70,7 +70,9 @@ results/visualize.py
 scripts/test_pipeline.py
 scripts/train_baseline_ca.py
 scripts/train_ste_tte.py
+test_day1.py
 test_import.py
+train_STE_TTE_colab.ipynb
 work_schedule_10days.md
 </directory_structure>
 
@@ -458,6 +460,1618 @@ from .vit_ste_tte import *
 from .vit_baseline_ca import *
 </file>
 
+<file path="models/vit_original.py">
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import pdb
+
+class PositionEmbs(nn.Module):
+    def __init__(self, num_patches, emb_dim, dropout_rate=0.1):
+        super(PositionEmbs, self).__init__()
+        # self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, emb_dim))
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, emb_dim))
+        if dropout_rate > 0:
+            self.dropout = nn.Dropout(dropout_rate)
+        else:
+            self.dropout = None
+
+    def forward(self, x):
+        
+        out = x + self.pos_embedding
+
+        if self.dropout:
+            out = self.dropout(out)
+
+        return out
+
+
+class MlpBlock(nn.Module):
+    """ Transformer Feed-Forward Block """
+    def __init__(self, in_dim, mlp_dim, out_dim, dropout_rate=0.1):
+        super(MlpBlock, self).__init__()
+
+        # init layers
+        self.fc1 = nn.Linear(in_dim, mlp_dim)
+        self.fc2 = nn.Linear(mlp_dim, out_dim)
+        self.act = nn.GELU()
+        if dropout_rate > 0.0:
+            self.dropout1 = nn.Dropout(dropout_rate)
+            self.dropout2 = nn.Dropout(dropout_rate)
+        else:
+            self.dropout1 = None
+            self.dropout2 = None
+
+    def forward(self, x):
+
+        out = self.fc1(x)
+        out = self.act(out)
+        if self.dropout1:
+            out = self.dropout1(out)
+
+        out = self.fc2(out)
+        out = self.dropout2(out)
+        return out
+
+
+class LinearGeneral(nn.Module):
+    def __init__(self, in_dim=(768,), feat_dim=(12, 64)):
+        super(LinearGeneral, self).__init__()
+
+        self.weight = nn.Parameter(torch.randn(*in_dim, *feat_dim))
+        self.bias = nn.Parameter(torch.zeros(*feat_dim))
+
+    def forward(self, x, dims):
+        a = torch.tensordot(x, self.weight, dims=dims) + self.bias
+        return a
+
+
+class SelfAttention(nn.Module):
+    def __init__(self, in_dim, heads=8, dropout_rate=0.1):
+        super(SelfAttention, self).__init__()
+        self.heads = heads
+        self.head_dim = in_dim // heads
+        self.scale = self.head_dim ** 0.5
+
+        self.query = LinearGeneral((in_dim,), (self.heads, self.head_dim))
+        self.key = LinearGeneral((in_dim,), (self.heads, self.head_dim))
+        self.value = LinearGeneral((in_dim,), (self.heads, self.head_dim))
+        self.out = LinearGeneral((self.heads, self.head_dim), (in_dim,))
+
+        if dropout_rate > 0:
+            self.dropout = nn.Dropout(dropout_rate)
+        else:
+            self.dropout = None
+
+    def forward(self, x):
+        b, n, _ = x.shape
+
+        q = self.query(x, dims=([2], [0]))
+        k = self.key(x, dims=([2], [0]))
+        v = self.value(x, dims=([2], [0]))
+
+        q = q.permute(0, 2, 1, 3)
+        k = k.permute(0, 2, 1, 3)
+        v = v.permute(0, 2, 1, 3)
+
+        attn_weights = torch.matmul(q, k.transpose(-2, -1)) / self.scale
+        attn_weights = F.softmax(attn_weights, dim=-1)
+        out = torch.matmul(attn_weights, v)
+        out = out.permute(0, 2, 1, 3)
+
+        out = self.out(out, dims=([2, 3], [0, 1]))
+
+        return out
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self, in_dim, mlp_dim, num_heads, dropout_rate=0.1, attn_dropout_rate=0.1):
+        super(EncoderBlock, self).__init__()
+
+        self.norm1 = nn.LayerNorm(in_dim)
+        self.attn = SelfAttention(in_dim, heads=num_heads, dropout_rate=attn_dropout_rate)
+        if dropout_rate > 0:
+            self.dropout = nn.Dropout(dropout_rate)
+        else:
+            self.dropout = None
+        self.norm2 = nn.LayerNorm(in_dim)
+        self.mlp = MlpBlock(in_dim, mlp_dim, in_dim, dropout_rate)
+
+    def forward(self, x):
+        residual = x
+        out = self.norm1(x)
+        out = self.attn(out)
+        if self.dropout:
+            out = self.dropout(out)
+        out += residual
+        residual = out
+
+        out = self.norm2(out)
+        out = self.mlp(out)
+        out += residual
+        return out
+
+
+class Encoder(nn.Module):
+    def __init__(self, num_patches, emb_dim, mlp_dim, num_layers=12, num_heads=12, dropout_rate=0.1, attn_dropout_rate=0.0):
+        super(Encoder, self).__init__()
+
+        # positional embedding
+        self.pos_embedding = PositionEmbs(num_patches, emb_dim, dropout_rate)
+
+        # encoder blocks
+        in_dim = emb_dim
+        self.encoder_layers = nn.ModuleList()
+        for i in range(num_layers):
+            layer = EncoderBlock(in_dim, mlp_dim, num_heads, dropout_rate, attn_dropout_rate)
+            self.encoder_layers.append(layer)
+        self.norm = nn.LayerNorm(in_dim)
+
+    def forward(self, x):
+
+        out = self.pos_embedding(x)
+
+        for layer in self.encoder_layers:
+            out = layer(out)
+
+        out = self.norm(out)
+        return out
+
+
+class Decoder(nn.Module):
+    def __init__(self, z_dim=512):
+        super(Decoder, self).__init__()
+        self.z_dim = z_dim
+
+        def Basic(intInput, intOutput):
+            return torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=intInput, out_channels=intOutput, kernel_size=3, stride=1, padding=1),
+                torch.nn.BatchNorm2d(intOutput),
+                torch.nn.ReLU(inplace=False),
+                torch.nn.Conv2d(in_channels=intOutput, out_channels=intOutput, kernel_size=3, stride=1, padding=1),
+                torch.nn.BatchNorm2d(intOutput),
+                torch.nn.ReLU(inplace=False)
+            )
+
+        def Gen(intInput, intOutput, nc):
+            return torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=intInput, out_channels=nc, kernel_size=3, stride=1, padding=1),
+                torch.nn.BatchNorm2d(nc),
+                torch.nn.ReLU(inplace=False),
+                torch.nn.Conv2d(in_channels=nc, out_channels=nc, kernel_size=3, stride=1, padding=1),
+                torch.nn.BatchNorm2d(nc),
+                torch.nn.ReLU(inplace=False),
+                torch.nn.Conv2d(in_channels=nc, out_channels=intOutput, kernel_size=3, stride=1, padding=1),
+                torch.nn.Tanh()
+            )
+
+        def Upsample(nc, intOutput):
+            return torch.nn.Sequential(
+                torch.nn.ConvTranspose2d(in_channels=nc, out_channels=intOutput, kernel_size=3, stride=2, padding=1,
+                                         output_padding=1),
+                torch.nn.BatchNorm2d(intOutput),
+                torch.nn.ReLU(inplace=False)
+            )
+
+        def Upsample2(nc, intOutput):
+            return torch.nn.Sequential(
+                torch.nn.ConvTranspose2d(in_channels=nc, out_channels=intOutput, kernel_size=4, stride=4, padding=1,
+                                         output_padding=2),
+                torch.nn.BatchNorm2d(intOutput),
+                torch.nn.ReLU(inplace=False)
+            )
+
+        self.decoder = nn.Sequential(
+            # Basic(2048, 1024),
+            # Upsample(1024, 1024),
+            # Basic(1024, 512),
+            # Upsample(512, 512),
+            # Basic(512, 256),
+            # Upsample(256, 256),
+            Basic(256, 128),
+            Upsample(128, 128),
+            Basic(128, 64),
+            Upsample(64, 64),
+            Upsample2(64, 64),
+            Gen(64, 3, 32),
+        )
+
+        self.de_dense = nn.Sequential(
+            nn.Linear(768, 256 * 16 * 16),
+            nn.ELU(),
+        )
+
+    def forward(self, x):
+        output = self.de_dense(x)
+        output = output.view(x.size(0), 256, 16, 16)
+        output = self.decoder(output)
+        return output
+
+class VisionTransformer(nn.Module):
+    """ Vision Transformer """
+    def __init__(self,
+                 image_size=(256, 256),
+                 patch_size=(16, 16),
+                 emb_dim=768,
+                 mlp_dim=3072,
+                 num_heads=12,
+                 num_layers=12,
+                 num_classes=1000,
+                 attn_dropout_rate=0.0,
+                 dropout_rate=0.1,
+                 num_frames=4,
+                 nu=0.01,
+                 feat_dim=None):
+        super(VisionTransformer, self).__init__()
+        h, w = image_size
+
+        # embedding layer
+        fh, fw = patch_size
+        gh, gw = h // fh, w // fw
+        num_patches = gh * gw * num_frames
+        self.embedding = nn.Conv2d(3, emb_dim, kernel_size=(fh, fw), stride=(fh, fw))
+        # class token
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_dim))
+
+        # transformer
+        self.transformer = Encoder(
+            num_patches=num_patches,
+            emb_dim=emb_dim,
+            mlp_dim=mlp_dim,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            dropout_rate=dropout_rate,
+            attn_dropout_rate=attn_dropout_rate)
+
+        #Decoder
+        self.decoder = Decoder()
+
+        #Maxpooling
+
+        self.maxpooling = nn.MaxPool1d(num_frames, stride=num_frames)
+
+        #Sphere
+        self.nu = nu
+        self.radius = torch.nn.Parameter(torch.tensor([0.0]))
+        self.center = torch.nn.Parameter(torch.randn(emb_dim))
+
+        # classfier
+        self.classifier = nn.Linear(emb_dim, num_classes)
+
+    def forward(self, x): # x: (b, n, c, h, w)
+        x = x.float().cuda()
+        for i in range(x.shape[1]):
+            emb = self.embedding(x[:, i])
+            emb = emb.permute(0, 2, 3, 1)
+            b, h, w, c = emb.shape
+            emb = emb.reshape(b, h * w, c)
+            if i == 0:
+                all_emb = emb
+            else:
+                all_emb = torch.cat((emb, all_emb), 1)  # (b, h*w*n, c)
+        # emb = self.embedding(x)     # (n, c, gh, gw)
+        # emb = emb.permute(0, 2, 3, 1)  # (n, gh, hw, c)
+        # b, h, w, c = emb.shape
+        # emb = emb.reshape(b, h * w, c)
+
+        b, n, c = all_emb.shape
+
+        # prepend class token
+        cls_token = self.cls_token.repeat(b, 1, 1)
+        emb = torch.cat([cls_token, all_emb], dim=1)
+
+        # transformer
+        feat = self.transformer(emb)
+        #decoder
+        output = self.decoder(feat[:, 0, :])
+
+        # classifier
+        # logits = self.classifier(feat[:, 0])
+        return output
+
+
+if __name__ == '__main__':
+    model = VisionTransformer(num_layers=2)
+    x = torch.randn((2, 3, 256, 256))
+    out = model(x)
+
+    state_dict = model.state_dict()
+
+    for key, value in state_dict.items():
+        print("{}: {}".format(key, value.shape))
+</file>
+
+<file path="PHAN_CONG_NHANH.md">
+# 🚀 TrafficVision-Transformer — Phân Công Nhanh (3 Người × 3 Ngày)
+
+> **Bài toán:** Unsupervised Anomaly Detection | **Metric:** AUC-ROC | **Loss:** MSE reconstruction
+
+---
+
+## 📁 Cấu Trúc Thư Mục Hiện Tại
+
+```
+TrafficVision-Transformer/
+│
+├── compute_auc.py                   ← [P1] Đã tạo sẵn — test + push cuối Ngày 2
+│
+├── configs/
+│   ├── train_config.py              ← [P1] ✅ Đã xong (đầy đủ args + model arch)
+│   └── model_config.py
+│
+├── data/
+│   └── dataset.py                   ← [P1] Fix bug shape dòng 56 + thêm docstring
+│
+├── engine/
+│   ├── trainer.py                   ← ✅ Đã cleanup (bỏ acc1s/acc5s → auc)
+│   └── checkpoint.py                ← ✅ Đã tạo (bỏ jax dependency)
+│
+├── models/
+│   ├── vit_ste_tte.py               ← [P2] Thêm docstring + fix .cuda() → .to(device)
+│   ├── vit_baseline_ca.py           ← [P3] Thêm docstring so sánh với STE-TTE
+│   ├── vit_original.py
+│   └── utils.py
+│
+├── scripts/
+│   ├── train_ste_tte.py             ← [P2] ✅ Sẵn sàng chạy (import đã đúng)
+│   └── train_baseline_ca.py         ← [P3] ✅ Sẵn sàng chạy (import đã đúng)
+│
+├── experiments_andt_ADrone_STE_TTE/          ← Output P2
+│   └── checkpoints/ (best.pth, current.pth)
+│
+├── experiments_andt_ADrone_baseline_CA/      ← Output P3
+│   └── checkpoints/ (best.pth, current.pth)
+│
+├── results/                         ← [P3]
+│   ├── visualize.py                 ← ✅ Đã tạo sẵn, test Ngày 2, chạy Ngày 3
+│   ├── comparison_table.md          ← Template — điền kết quả Ngày 3
+│   └── roc_comparison.png           ← Output sau khi chạy visualize.py
+│
+├── training_log_ste_tte.txt         ← Auto-tạo khi P2 train
+├── training_log_baseline.txt        ← Auto-tạo khi P3 train
+└── README.md                        ← [P1] Viết Ngày 3
+```
+
+---
+
+## 📅 Timeline 3 Ngày
+
+### 🗓 Ngày 1 — Cleanup & Setup Code
+
+| | **Người 1** | **Người 2** | **Người 3** |
+|---|---|---|---|
+| **Nhiệm vụ** | Fix data pipeline | Document + fix STE-TTE model | Document baseline CA |
+| **Files** | `data/dataset.py` | `models/vit_ste_tte.py` | `models/vit_baseline_ca.py` |
+
+**Người 1:**
+- Fix bug trong `data/dataset.py` dòng 56:
+  ```python
+  # SAI (width/height bị hoán vị):
+  batch_frames = np.zeros((..., self._resize_width, self._resize_height))
+  # ĐÚNG:
+  batch_frames = np.zeros((..., self._resize_height, self._resize_width))
+  ```
+- Thêm docstring vào class `DataLoader`
+
+**Người 2:**
+- Thêm docstring vào `VisionTransformer.forward()` trong `models/vit_ste_tte.py`
+- Fix hardcode cuda:
+  ```python
+  # Đổi: x = x.float().cuda()
+  # Thành: x = x.float().to(device)
+  ```
+- Kiểm tra decoder output shape đúng `(B, 3, 256, 256)`
+
+**Người 3:**
+- Thêm docstring đầu file `models/vit_baseline_ca.py` (giải thích khác biệt vs STE-TTE)
+- Đọc + review `scripts/train_baseline_ca.py`
+
+---
+
+### 🗓 Ngày 2 — Training
+
+| | **Người 1** | **Người 2** | **Người 3 (sáng)** | **Người 3 (chiều)** |
+|---|---|---|---|---|
+| **Nhiệm vụ** | ⚡ Push `compute_auc.py` → fix `dataset.py` | Train STE-TTE cả ngày | Train Baseline CA | Test `results/visualize.py` |
+| **Output** | `compute_auc.py` trên git | `training_log_ste_tte.txt` | `training_log_baseline.txt` | `visualize.py` ready |
+
+> ⚠️ **Người 1 phải push `compute_auc.py` trước cuối Ngày 2** — Người 2 và 3 cần nó vào Ngày 3!
+
+**Lệnh train — Người 2:**
+```bash
+python scripts/train_ste_tte.py \
+    --train 1 \
+    --epochs 5 \
+    --batch-size 8 \
+    --lr 1e-4 \
+    --model-arch b16 \
+    --image-size 384 \
+    --data-dir ../../UIT-ADrone
+```
+
+**Lệnh train — Người 3:**
+```bash
+python scripts/train_baseline_ca.py \
+    --train 1 \
+    --epochs 5 \
+    --batch-size 8 \
+    --lr 1e-4 \
+    --model-arch b16 \
+    --image-size 384 \
+    --data-dir ../../UIT-ADrone
+```
+
+---
+
+### 🗓 Ngày 3 — Inference, Kết Quả & Báo Cáo
+
+| | **Người 1** | **Người 2** | **Người 3** |
+|---|---|---|---|
+| **Nhiệm vụ** | Viết README | Inference + tính AUC STE-TTE | Inference Baseline + tổng hợp + ROC |
+| **Output** | `README.md` | AUC score STE-TTE | `comparison_table.md`, `roc_comparison.png` |
+
+**Người 2 — Ngày 3:**
+```bash
+# 1. Inference
+python scripts/train_ste_tte.py --train 0 --data-dir ../../UIT-ADrone
+
+# 2. Tính AUC
+python compute_auc.py \
+    --scores-dir experiments_andt_ADrone_STE_TTE/ \
+    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
+    --plot --save-plot results/roc_ste_tte.png
+```
+
+**Người 3 — Ngày 3:**
+```bash
+# 1. Inference
+python scripts/train_baseline_ca.py --train 0 --data-dir ../../UIT-ADrone
+
+# 2. Tính AUC
+python compute_auc.py \
+    --scores-dir experiments_andt_ADrone_baseline_CA/ \
+    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
+    --plot --save-plot results/roc_baseline.png
+
+# 3. Vẽ ROC comparison (sau khi cả 2 model đã xong)
+python results/visualize.py
+
+# 4. Điền kết quả vào results/comparison_table.md
+```
+
+---
+
+## 🔗 Dependency Chain
+
+```
+P1: compute_auc.py ──(push cuối Ngày 2)──┐
+                                          ├──► P2 Ngày 3 → AUC STE-TTE
+                                          └──► P3 Ngày 3 → AUC Baseline
+                                                      │
+                                                      ▼
+                                          P3: comparison_table.md
+                                              roc_comparison.png
+```
+
+---
+
+## ⚙️ Bảng File Ownership
+
+| File | Người phụ trách | Trạng thái |
+|---|---|---|
+| `data/dataset.py` | **P1** | ⬜ Fix bug dòng 56 + docstring |
+| `compute_auc.py` | **P1** | ⬜ Test + push Ngày 2 |
+| `configs/train_config.py` | **P1** | ✅ Xong |
+| `README.md` | **P1** | ⬜ Viết Ngày 3 |
+| `models/vit_ste_tte.py` | **P2** | ⬜ Docstring + fix `.cuda()` |
+| `scripts/train_ste_tte.py` | **P2** | ✅ Sẵn sàng chạy |
+| `models/vit_baseline_ca.py` | **P3** | ⬜ Docstring |
+| `scripts/train_baseline_ca.py` | **P3** | ✅ Sẵn sàng chạy |
+| `results/visualize.py` | **P3** | ✅ Đã tạo, test Ngày 2 |
+| `results/comparison_table.md` | **P3** | ⬜ Điền Ngày 3 |
+| `engine/trainer.py` | — | ✅ Đã cleanup |
+| `engine/checkpoint.py` | — | ✅ Đã tạo |
+
+> **Lưu ý:** File `.npy` trong `experiments_andt_ADrone_STE_TTE/` và `experiments_andt_ADrone_baseline_CA/` — **ĐỪNG XÓA** sau khi test, cần để tính AUC và vẽ biểu đồ.
+</file>
+
+<file path="README.md">
+# TrafficVision-Transformer
+</file>
+
+<file path="results/comparison_table.md">
+## Kết quả so sánh trên UIT-ADrone Dataset
+
+| Model | AUC-ROC | Training Time | #Params |
+|---|---|---|---|
+| Baseline (CA) | ? | ? | ? |
+| Proposed (STE-TTE) | ? | ? | ? |
+| Paper reported | ~0.xx | — | — |
+
+> Điền vào sau khi chạy xong inference + `compute_auc.py`
+
+---
+
+## Cách tính kết quả
+
+```bash
+# STE-TTE
+python compute_auc.py \
+    --scores-dir experiments_andt_ADrone_STE_TTE/ \
+    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
+    --plot --save-plot results/roc_ste_tte.png
+
+# Baseline CA
+python compute_auc.py \
+    --scores-dir experiments_andt_ADrone_baseline_CA/ \
+    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
+    --plot --save-plot results/roc_baseline.png
+
+# Vẽ comparison plot
+python results/visualize.py
+```
+
+---
+
+## Notes
+
+- AUC-ROC cao hơn = model phát hiện anomaly tốt hơn
+- Kết quả bị ảnh hưởng bởi: số epoch, learning rate, image size
+- Training chỉ dùng **normal frames** (unsupervised)
+</file>
+
+<file path="results/visualize.py">
+"""
+results/visualize.py — Visualization utilities cho anomaly detection
+Người phụ trách: Người 3 (chuẩn bị Ngày 2, chạy Ngày 3)
+
+Usage (sau khi đã có .npy score files từ cả 2 model):
+    python results/visualize.py
+"""
+
+import os
+import numpy as np
+import glob
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
+os.makedirs('results', exist_ok=True)
+
+
+# ─── ROC Curve Comparison ──────────────────────────────────────────────────────
+
+def plot_roc_comparison(models: dict, labels, save_path='results/roc_comparison.png'):
+    """
+    Vẽ ROC curve của nhiều model trên cùng 1 plot.
+
+    Args:
+        models: dict {'Model Name': scores_array}
+        labels: ground-truth binary labels array
+        save_path: đường dẫn lưu ảnh
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    for name, scores in models.items():
+        fpr, tpr, _ = roc_curve(labels, scores)
+        roc_auc = auc(fpr, tpr)
+        ax.plot(fpr, tpr, linewidth=2, label=f'{name} (AUC = {roc_auc:.4f})')
+
+    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random')
+    ax.set_xlabel('False Positive Rate', fontsize=12)
+    ax.set_ylabel('True Positive Rate', fontsize=12)
+    ax.set_title('ROC Curve — UIT-ADrone Anomaly Detection', fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    print(f'Saved: {save_path}')
+    plt.close()
+
+
+# ─── Anomaly Score Timeline ────────────────────────────────────────────────────
+
+def plot_score_timeline(scene_name, scores_dir, labels_dir, out_dir='results/'):
+    """
+    Vẽ anomaly score theo thời gian cho 1 video scene.
+
+    Args:
+        scene_name: tên scene (ví dụ: 'DJI_0073')
+        scores_dir: thư mục chứa .npy scores
+        labels_dir: thư mục chứa .npy labels
+        out_dir: thư mục lưu ảnh output
+    """
+    scores = np.load(os.path.join(scores_dir, scene_name + '.npy'))
+    labels = np.load(os.path.join(labels_dir, scene_name + '.npy'), allow_pickle=True)
+
+    # Align length
+    min_len = min(len(scores), len(labels))
+    scores = scores[:min_len]
+    labels = labels[len(labels) - min_len:]
+
+    plt.figure(figsize=(14, 4))
+    plt.plot(scores, label='Anomaly Score (MSE)', color='steelblue', linewidth=1)
+    plt.fill_between(range(len(labels)), 0, scores.max(),
+                     where=(labels == 1), alpha=0.3, color='red', label='Ground Truth Anomaly')
+
+    threshold = np.mean(scores) + np.std(scores)
+    plt.axhline(y=threshold, color='orange', linestyle='--', linewidth=1.5,
+                label=f'Threshold (mean+std) = {threshold:.4f}')
+
+    plt.xlabel('Frame Index')
+    plt.ylabel('MSE Loss')
+    plt.title(f'Anomaly Detection Score — {scene_name}')
+    plt.legend()
+    plt.tight_layout()
+
+    os.makedirs(out_dir, exist_ok=True)
+    save_path = os.path.join(out_dir, f'{scene_name}_scores.png')
+    plt.savefig(save_path, dpi=120)
+    print(f'Saved: {save_path}')
+    plt.close()
+
+
+# ─── Load all scores from a directory ─────────────────────────────────────────
+
+def load_all_scores(scores_dir, labels_dir):
+    """Load và align toàn bộ scores + labels từ một thư mục."""
+    all_scores, all_labels = [], []
+    score_files = sorted(glob.glob(os.path.join(scores_dir, '*.npy')))
+    for sf in score_files:
+        name = os.path.basename(sf)
+        label_path = os.path.join(labels_dir, name)
+        if not os.path.exists(label_path):
+            continue
+        scores = np.load(sf)
+        labels = np.load(label_path, allow_pickle=True)
+        min_len = min(len(scores), len(labels))
+        all_scores.extend(scores[:min_len].tolist())
+        all_labels.extend(labels[len(labels) - min_len:].tolist())
+    return np.array(all_scores), np.array(all_labels)
+
+
+# ─── Main: chạy sau khi có đủ score files từ cả 2 model ─────────────────────
+
+if __name__ == '__main__':
+    LABELS_DIR  = '../../UIT-ADrone/test/test_frame_mask/'
+    STE_TTE_DIR = '../experiments_andt_ADrone_STE_TTE/'
+    BASELINE_DIR = '../experiments_andt_ADrone_baseline_CA/'
+
+    # --- Load scores ---
+    ste_scores, labels = load_all_scores(STE_TTE_DIR, LABELS_DIR)
+    baseline_scores, _ = load_all_scores(BASELINE_DIR, LABELS_DIR)
+
+    # --- Plot ROC comparison ---
+    plot_roc_comparison(
+        models={
+            'Baseline CA':        baseline_scores,
+            'STE-TTE (Proposed)': ste_scores,
+        },
+        labels=labels,
+        save_path='results/roc_comparison.png'
+    )
+
+    # --- Plot score timeline cho từng scene ---
+    scenes = [os.path.splitext(os.path.basename(f))[0]
+              for f in glob.glob(os.path.join(STE_TTE_DIR, '*.npy'))]
+    for scene in scenes:
+        try:
+            plot_score_timeline(scene, STE_TTE_DIR, LABELS_DIR, out_dir='results/scores/')
+        except Exception as e:
+            print(f"[WARN] Skip {scene}: {e}")
+
+    print("\nDone! Visualizations saved to results/")
+</file>
+
+<file path="scripts/test_pipeline.py">
+import os
+import sys
+
+# Thêm thư mục gốc của dự án vào đường dẫn tìm kiếm của Python
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from configs import get_train_config
+from data.dataset import DataLoader
+from torchvision import transforms
+
+def main():
+    print("--- BƯỚC 1: TẢI CẤU HÌNH ---")
+    cfg = get_train_config()
+
+    print("\n--- BƯỚC 2: KHỞI TẠO DATA PIPELINE ---")
+    data_path = os.path.abspath(os.path.join(cfg.data_dir, "train", "frames"))
+    print(f"Đường dẫn tìm kiếm dữ liệu: {data_path}")
+
+    if not os.path.exists(data_path):
+        print(f"\n[CẢNH BÁO] Thư mục '{data_path}' chưa tồn tại trên máy bạn.")
+        print("=> Module import và Config đã thông suốt, nhưng bạn cần chép dataset vào đúng vị trí để test thực tế!")
+        return
+
+    try:
+        transform = transforms.Compose([transforms.ToTensor()])
+        dataset = DataLoader(
+            video_folder=data_path,
+            transform=transform,
+            resize_height=cfg.image_size,
+            resize_width=cfg.image_size,
+            time_step=cfg.num_frames
+        )
+        print(f"\n=> TÍCH HỢP THÀNH CÔNG! Pipeline đã sẵn sàng, load được {len(dataset)} samples.")
+    except Exception as e:
+        print(f"\n=> LỖI TÍCH HỢP: {e}")
+
+if __name__ == '__main__':
+    main()
+</file>
+
+<file path="test_day1.py">
+# -*- coding: utf-8 -*-
+# test_day1.py - Kiem chung Ngay 1 (Nguoi A + Nguoi B)
+# Chay: python test_day1.py
+# Khong can dataset that hay opencv - dung dummy tensor + mock cv2.
+
+import sys
+import types
+import numpy as np
+import torch
+
+# ---- Mock cv2 truoc khi import data.dataset (khong can cai opencv) ----
+cv2_mock = types.ModuleType("cv2")
+def _imread(path): return np.zeros((256, 256, 3), dtype=np.uint8)
+def _resize(img, size): return np.zeros((size[1], size[0], 3), dtype=np.uint8)
+cv2_mock.imread = _imread
+cv2_mock.resize = _resize
+sys.modules["cv2"] = cv2_mock
+
+# ---- Helper output ----
+def ok(msg):   print(f"  [PASS]  {msg}")
+def fail(msg, e=""): print(f"  [FAIL]  {msg}\n         {e}"); sys.exit(1)
+def section(msg): print(f"\n{'='*60}\n>> {msg}\n{'='*60}")
+
+# =============================================================================
+# [A] Kiem tra dataset.py - shape cua batch_frames
+# =============================================================================
+section("[NGUOI A] dataset.py - batch_frames shape")
+
+try:
+    from data.dataset import DataLoader as TVDataLoader, np_load_frame
+    ok("Import data.dataset thanh cong")
+except Exception as e:
+    fail("Import data.dataset", e)
+
+resize_h, resize_w = 384, 384
+time_step, num_pred = 4, 1
+T = time_step + num_pred  # = 5
+
+# [A's fix]: batch_frames phai la (T, 3, resize_HEIGHT, resize_WIDTH)
+# Bug cu la (T, 3, resize_WIDTH, resize_HEIGHT) - bi hoan vi
+batch_frames_256 = np.zeros((T, 3, 256,     256))
+batch_frames_std = np.zeros((T, 3, resize_h, resize_w))
+
+assert batch_frames_256.shape == (T, 3, 256, 256), "Shape batch_frames_256 sai!"
+ok(f"batch_frames_256  shape = {batch_frames_256.shape}  <- (T=5, C=3, H=256, W=256)")
+
+assert batch_frames_std.shape == (T, 3, resize_h, resize_w), "Shape batch_frames_standard sai!"
+ok(f"batch_frames_std  shape = {batch_frames_std.shape}  <- (T=5, C=3, H={resize_h}, W={resize_w})")
+
+# H=resize_HEIGHT phai dung truoc W=resize_WIDTH
+assert batch_frames_std.shape[2] == resize_h, \
+    f"Chieu 2 phai la resize_HEIGHT={resize_h}, nhan {batch_frames_std.shape[2]}"
+assert batch_frames_std.shape[3] == resize_w, \
+    f"Chieu 3 phai la resize_WIDTH={resize_w},  nhan {batch_frames_std.shape[3]}"
+ok("H truoc W - bug hoan vi cua A da fix dung")
+
+# =============================================================================
+# [B] Kiem tra vit_ste_tte.py - forward() tren CPU + output shape
+# =============================================================================
+section("[NGUOI B] vit_ste_tte.py - .to(device) + output shape")
+
+try:
+    from models.vit_ste_tte import VisionTransformer
+    ok("Import models.vit_ste_tte thanh cong")
+except Exception as e:
+    fail("Import models.vit_ste_tte", e)
+
+# num_layers=1 de test nhanh (khong can pretrained weights)
+try:
+    model = VisionTransformer(
+        image_size=(256, 256),
+        num_frames=4,
+        num_layers=1,
+        num_heads=6,
+        emb_dim=768,
+        mlp_dim=1536,
+    )
+    model.eval()
+    ok("VisionTransformer(num_layers=1) khoi tao thanh cong")
+except Exception as e:
+    fail("Khoi tao VisionTransformer", e)
+
+# .to(device) hoat dong dung tren CPU
+device = next(model.parameters()).device
+ok(f"Model device tu detect = {device}  (khong hardcode .cuda())")
+
+# NOTE: spatial_transformer dung timm 'vit_base_patch32_384'
+# -> phai feed vao 384x384 (khong phai 256x256)
+# Train loop thuc te: feed dict["standard"] (384x384) vao model
+# Decoder output moi la 256x256 (anh reconstruct nho hon)
+B, N, C = 2, 4, 3
+H_in, W_in = 384, 384   # input cho spatial encoder
+x_dummy = torch.randn(B, N, C, H_in, W_in)  # float32, o CPU
+
+try:
+    with torch.no_grad():
+        output = model(x_dummy)
+    ok("forward() chay thanh cong tren CPU - khong can .cuda()")
+except Exception as e:
+    fail("forward() crash", e)
+
+# Output shape: decoder luon tra ve (B, 3, 256, 256) du input la 384x384
+expected_shape = (B, 3, 256, 256)
+assert output.shape == torch.Size(expected_shape), \
+    f"Output shape sai: expected {expected_shape}, got {tuple(output.shape)}"
+ok(f"Output shape = {tuple(output.shape)}  <- (B=2, C=3, H=256, W=256) [decoder fixed output]")
+
+# Kiem tra output la float32
+assert output.dtype == torch.float32, f"Output dtype sai: {output.dtype}"
+ok(f"Output dtype = {output.dtype}")
+
+# Kiem tra gia tri trong khoang [-1, 1] (decoder dung Tanh)
+assert output.min() >= -1.0 and output.max() <= 1.0, \
+    f"Output nam ngoai [-1, 1]: min={output.min():.4f}, max={output.max():.4f}"
+ok(f"Output range [{output.min():.4f}, {output.max():.4f}] subset [-1, 1] (Tanh decoder)")
+
+# =============================================================================
+# [A+B] Integration: dataset output -> model input -> MSE loss
+# =============================================================================
+section("[A + B] Integration: dataset output -> model input -> MSE loss")
+
+# Gia lap mot batch tu DataLoader (giong output cua A's dataset)
+batch_from_dataset = {
+    "256":      torch.from_numpy(batch_frames_256).float(),  # (5, 3, 256, 256)
+    "standard": torch.from_numpy(batch_frames_std).float(),  # (5, 3, 384, 384)
+}
+
+# Train loop: feed dict["standard"] (384x384) vao model, so sanh recon voi dict["256"]
+# input_frames: lay N=4 frames tu standard (384x384)
+# target_frame: lay frame cuoi tu 256-version (256x256) - la cai model phai reconstruct
+input_frames = batch_from_dataset["standard"][:time_step].unsqueeze(0)  # (1, 4, 3, 384, 384)
+target_frame = batch_from_dataset["256"][time_step].unsqueeze(0)         # (1, 3, 256, 256)
+
+ok(f"input_frames shape = {tuple(input_frames.shape)}  <- (B, N, C, 384, 384) [standard]")
+ok(f"target_frame shape = {tuple(target_frame.shape)}  <- (B, C, 256, 256) [decoder target]")
+
+try:
+    with torch.no_grad():
+        recon = model(input_frames)
+    ok(f"model(input_frames) -> recon shape = {tuple(recon.shape)}")
+except Exception as e:
+    fail("Integration model(input_frames) crash", e)
+
+try:
+    loss = torch.nn.functional.mse_loss(recon, target_frame)
+    ok(f"MSE loss = {loss.item():.6f}  - shape khop, tinh duoc loss")
+except Exception as e:
+    fail("MSE loss shape mismatch", e)
+
+# =============================================================================
+print(f"\n{'='*60}")
+print(f"  >>> TAT CA PASS - Ngay 1 (A + B) kiem chung xong! <<<")
+print(f"{'='*60}\n")
+</file>
+
+<file path="test_import.py">
+from models.vit_ste_tte import *
+
+print("IMPORT OK")
+</file>
+
+<file path="train_STE_TTE_colab.ipynb">
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 🚀 TrafficVision-Transformer — Train STE-TTE (Người 2)\n",
+    "\n",
+    "**Notebook này dành cho Người 2.** Chạy từng ô theo thứ tự, đọc hướng dẫn trước mỗi ô.\n",
+    "\n",
+    "> ⚠️ Trước khi chạy: **Runtime → Change runtime type → T4 GPU**"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 1 — Kiểm tra GPU"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import torch\n",
+    "print('CUDA available:', torch.cuda.is_available())\n",
+    "print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'No GPU!')\n",
+    "!nvidia-smi"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 2 — Mount Google Drive\n",
+    "\n",
+    "Sẽ hiện popup yêu cầu đăng nhập Google. Nhấn **Connect to Google Drive**."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from google.colab import drive\n",
+    "drive.mount('/content/drive')\n",
+    "print('Drive mounted OK!')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 3 — Clone code từ GitHub\n",
+    "\n",
+    "**Sửa `YOUR_GITHUB_REPO_URL` thành link repo của nhóm.**\n",
+    "\n",
+    "Ví dụ: `https://github.com/ten-nhom/TrafficVision-Transformer.git`\n",
+    "\n",
+    "Nếu repo **private**, dùng token:\n",
+    "`https://<TOKEN>@github.com/ten-nhom/TrafficVision-Transformer.git`"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "\n",
+    "GITHUB_REPO_URL = 'https://github.com/YOUR_USERNAME/TrafficVision-Transformer.git'  # ← SỬA Ở ĐÂY\n",
+    "REPO_DIR = '/content/TrafficVision-Transformer'\n",
+    "\n",
+    "if os.path.exists(REPO_DIR):\n",
+    "    print('Repo đã tồn tại, pulling bản mới nhất...')\n",
+    "    !cd {REPO_DIR} && git pull\n",
+    "else:\n",
+    "    !git clone {GITHUB_REPO_URL} {REPO_DIR}\n",
+    "\n",
+    "os.chdir(REPO_DIR)\n",
+    "print('Working dir:', os.getcwd())\n",
+    "!ls"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 4 — Cài dependencies\n",
+    "\n",
+    "Colab đã có sẵn torch/torchvision, chỉ cần cài thêm `timm`."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "!pip install timm==1.0.3 tqdm scikit-learn -q\n",
+    "print('Dependencies installed OK!')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 5 — Trỏ đến dataset UIT-ADrone\n",
+    "\n",
+    "Dataset phải được upload lên Google Drive theo cấu trúc:\n",
+    "```\n",
+    "My Drive/\n",
+    "└── UIT-ADrone/\n",
+    "    ├── train/\n",
+    "    │   └── frames/   ← chứa các folder scene với .jpg\n",
+    "    └── test/\n",
+    "        ├── frames/   ← chứa các folder scene với .jpg\n",
+    "        └── test_frame_mask/  ← chứa các file .npy label\n",
+    "```\n",
+    "\n",
+    "**Chạy ô này để kiểm tra dataset có đúng vị trí không.**"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "\n",
+    "# ← SỬA đường dẫn nếu bạn để dataset ở thư mục khác trong Drive\n",
+    "DATA_DIR = '/content/drive/MyDrive/UIT-ADrone'\n",
+    "\n",
+    "# Kiểm tra cấu trúc\n",
+    "train_path = os.path.join(DATA_DIR, 'train/frames')\n",
+    "test_path  = os.path.join(DATA_DIR, 'test/frames')\n",
+    "label_path = os.path.join(DATA_DIR, 'test/test_frame_mask')\n",
+    "\n",
+    "print('Train frames:', os.path.exists(train_path), '→', train_path)\n",
+    "print('Test frames: ', os.path.exists(test_path),  '→', test_path)\n",
+    "print('Labels:      ', os.path.exists(label_path), '→', label_path)\n",
+    "\n",
+    "if os.path.exists(train_path):\n",
+    "    scenes = os.listdir(train_path)\n",
+    "    print(f'\\nTìm thấy {len(scenes)} scene trong train: {scenes[:5]}...')\n",
+    "else:\n",
+    "    print('\\n❌ KHÔNG TÌM THẤY DATASET! Kiểm tra lại đường dẫn DATA_DIR.')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 6 — Tạo thư mục lưu checkpoint trên Drive\n",
+    "\n",
+    "Checkpoint sẽ được lưu thẳng vào Drive để không mất khi Colab disconnect."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "\n",
+    "# Thư mục lưu checkpoint trên Drive\n",
+    "DRIVE_CKPT_DIR = '/content/drive/MyDrive/experiments_andt_ADrone_STE_TTE'\n",
+    "os.makedirs(os.path.join(DRIVE_CKPT_DIR, 'checkpoints'), exist_ok=True)\n",
+    "\n",
+    "# Symlink để script tự động save vào Drive\n",
+    "LOCAL_SAVE_PATH = '/content/TrafficVision-Transformer/experiments_andt_ADrone_STE_TTE'\n",
+    "if not os.path.exists(LOCAL_SAVE_PATH):\n",
+    "    os.symlink(DRIVE_CKPT_DIR, LOCAL_SAVE_PATH)\n",
+    "    print(f'Symlink created: {LOCAL_SAVE_PATH} → {DRIVE_CKPT_DIR}')\n",
+    "else:\n",
+    "    print(f'Thư mục đã tồn tại: {LOCAL_SAVE_PATH}')\n",
+    "\n",
+    "print('Checkpoint sẽ tự động lưu vào Drive!')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 7 — TRAINING 🚂\n",
+    "\n",
+    "Chạy ô này để bắt đầu train. Log sẽ hiện trực tiếp bên dưới.\n",
+    "\n",
+    "**Ước tính thời gian:** ~30-90 phút tùy GPU Colab cấp.\n",
+    "\n",
+    "> ⚠️ **Đừng đóng tab** trong lúc chạy! Nếu bị disconnect thì checkpoint vẫn còn trên Drive."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "os.chdir('/content/TrafficVision-Transformer')\n",
+    "\n",
+    "# Chỉnh DATA_DIR cho khớp với BƯỚC 5\n",
+    "DATA_DIR = '/content/drive/MyDrive/UIT-ADrone'\n",
+    "\n",
+    "!python scripts/train_ste_tte.py \\\n",
+    "    --train 1 \\\n",
+    "    --epochs 5 \\\n",
+    "    --batch-size 8 \\\n",
+    "    --lr 1e-4 \\\n",
+    "    --model-arch b16 \\\n",
+    "    --image-size 384 \\\n",
+    "    --data-dir {DATA_DIR}"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 8 — Kiểm tra kết quả training"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "\n",
+    "# Kiểm tra checkpoint đã lưu chưa\n",
+    "ckpt_dir = '/content/drive/MyDrive/experiments_andt_ADrone_STE_TTE/checkpoints'\n",
+    "print('Files trong checkpoints:')\n",
+    "for f in os.listdir(ckpt_dir):\n",
+    "    size_mb = os.path.getsize(os.path.join(ckpt_dir, f)) / 1e6\n",
+    "    print(f'  {f} — {size_mb:.1f} MB')\n",
+    "\n",
+    "# Đọc training log\n",
+    "log_path = '/content/TrafficVision-Transformer/training_log_ste_tte.txt'\n",
+    "if os.path.exists(log_path):\n",
+    "    print('\\n=== Training Log ===')\n",
+    "    with open(log_path) as f:\n",
+    "        for line in f:\n",
+    "            print(line.strip())\n",
+    "else:\n",
+    "    print('Chưa có log — training chưa xong?')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## BƯỚC 9 — Copy log lên Drive (để không mất sau khi session hết)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import shutil\n",
+    "\n",
+    "src = '/content/TrafficVision-Transformer/training_log_ste_tte.txt'\n",
+    "dst = '/content/drive/MyDrive/experiments_andt_ADrone_STE_TTE/training_log_ste_tte.txt'\n",
+    "\n",
+    "if os.path.exists(src):\n",
+    "    shutil.copy(src, dst)\n",
+    "    print(f'Log đã copy lên Drive: {dst}')\n",
+    "else:\n",
+    "    print('Không tìm thấy log file.')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "## ✅ Xong Ngày 2!\n",
+    "\n",
+    "Sau khi train xong, báo cho nhóm:\n",
+    "- Checkpoint đã lưu trong Google Drive: `experiments_andt_ADrone_STE_TTE/checkpoints/best.pth`\n",
+    "- Training log: `experiments_andt_ADrone_STE_TTE/training_log_ste_tte.txt`\n",
+    "\n",
+    "**Ngày 3:** Chạy inference + tính AUC (tao sẽ hướng dẫn sau khi Ngày 2 xong)."
+   ]
+  }
+ ],
+ "metadata": {
+  "accelerator": "GPU",
+  "colab": {
+   "gpuType": "T4",
+   "provenance": []
+  },
+  "kernelspec": {
+   "display_name": "Python 3",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 0
+}
+</file>
+
+<file path="work_schedule_10days.md">
+# 📅 Lịch phân công 3 người × 10 ngày — Project ASTT
+
+## Vai trò
+
+| Người | Ký hiệu | Vai trò chính |
+|-------|---------|--------------|
+| Người A | 🔵 A | **Data & Infrastructure** — cấu trúc thư mục, xử lý nhãn, data pipeline |
+| Người B | 🟢 B | **Model & Training** — model files, engine train/eval, scripts |
+| Người C | 🟡 C | **Experiment & Docs** — chạy thử nghiệm, đánh giá kết quả, README |
+
+---
+
+## Bảng tổng quan theo ngày
+
+| Ngày | 🔵 A | 🟢 B | 🟡 C |
+|------|------|------|------|
+| **1** | Tạo cấu trúc thư mục mới | Nghiên cứu code model cũ | Đọc README, liệt kê dataset |
+| **2** | Viết `data/label_map.py` | Tách `models/` từ root | Xác nhận 3 nhãn trong dataset |
+| **3** | Viết `data/preprocess.py` | Tách `models/` (tiếp) | Viết script thống kê nhãn |
+| **4** | Viết `data/dataset.py` | Viết `engine/trainer.py` | Kiểm thử `preprocess.py` |
+| **5** | Viết `configs/` package | Viết `engine/evaluator.py` | Kiểm thử label mapping |
+| **6** | Tích hợp data pipeline | Viết `scripts/train_*.py` | Hỗ trợ debug tích hợp |
+| **7** | Unit test data module | Viết `scripts/train_*.py` (tiếp) | Chuẩn bị lệnh chạy experiment |
+| **8** | Hỗ trợ fix bugs pipeline | Chạy training thử (dry run) | Theo dõi log training |
+| **9** | Viết `requirements.txt` | Chạy evaluation + ghi kết quả | Phân tích kết quả |
+| **10** | Review code toàn bộ | Fix bugs cuối + merge | Viết README mới + báo cáo |
+
+---
+
+## Chi tiết từng ngày
+
+---
+
+### 🗓️ Ngày 1 — Khởi động & lên kế hoạch
+
+**🔵 A:**
+- Tạo toàn bộ thư mục mới: `configs/`, `data/`, `models/`, `engine/`, `scripts/`, `outputs/`
+- Tạo các file `__init__.py` placeholder
+- Không xoá file cũ, để song song
+
+**🟢 B:**
+- Đọc kỹ 3 model files: `model_original.py`, `model_ste_tte.py`, `model_baseline_ca.py`
+- Ghi chú các import dependency, interface giữa các file
+- Lập danh sách thay đổi cần làm khi chuyển vào `models/`
+
+**🟡 C:**
+- Đọc `README.md` và dataset description
+- Liệt kê 10 nhãn anomaly gốc với tên đầy đủ
+- Xác nhận lại với nhóm: nhãn 2, 3, 9 là gì, có đúng file `.npy` không
+
+**✅ Deliverable cuối ngày 1:** Thư mục mới tồn tại, danh sách nhãn được xác nhận
+
+---
+
+### 🗓️ Ngày 2 — Label mapping & Model tách
+
+**🔵 A:**
+- Viết `data/label_map.py` hoàn chỉnh:
+  - Dict `LABEL_MAP = {3: 0, 2: 1, 9: 2}`
+  - Hàm `remap_label_array(arr)`
+  - Hàm `filter_frames_by_labels(arr)` → mask cho frame hợp lệ
+
+**🟢 B:**
+- Copy + refactor `model_original.py` → `models/vit_original.py`
+  - Sửa import paths
+  - Thêm docstring cho class/function chính
+
+**🟡 C:**
+- Kiểm tra thực tế file `.npy` ground truth trong `UIT-ADrone/test/test_frame_mask/`
+- Xem phân phối nhãn: mỗi nhãn chiếm bao nhiêu frame?
+- Báo lại cho A để điều chỉnh logic nếu cần
+
+**✅ Deliverable:** `label_map.py` draft, `models/vit_original.py` xong
+
+---
+
+### 🗓️ Ngày 3 — Preprocessing & Model (tiếp)
+
+**🔵 A:**
+- Viết `data/preprocess.py`:
+  - Hàm `convert_label_files(input_dir, output_dir)`
+  - Tạo thư mục output `test_frame_mask_3cls/`
+  - Log thống kê trước/sau chuyển đổi
+
+**🟢 B:**
+- Copy + refactor `model_ste_tte.py` → `models/vit_ste_tte.py`
+- Copy + refactor `model_baseline_ca.py` → `models/vit_baseline_ca.py`
+- Tạo `models/__init__.py` export cả 3 model
+
+**🟡 C:**
+- Viết script nhỏ `notebooks/explore_labels.ipynb` hoặc `.py`:
+  - Đọc file `.npy` → vẽ histogram phân phối nhãn
+  - Kiểm tra nhãn 2, 3, 9 có đủ data không
+  - Ghi kết quả vào `outputs/label_stats.txt`
+
+**✅ Deliverable:** `preprocess.py` draft, `models/` package hoàn chỉnh, thống kê nhãn
+
+---
+
+### 🗓️ Ngày 4 — Dataset class & Trainer
+
+**🔵 A:**
+- Viết `data/dataset.py` (từ `data_utils.py` cũ):
+  - Giữ nguyên `DataLoader` class
+  - Thêm parameter `label_map` tùy chọn
+  - Test import từ `data/`
+
+**🟢 B:**
+- Viết `engine/trainer.py`:
+  - Tách `train_epoch()`, `valid_epoch()`, `save_model()` từ các `train_val_*.py`
+  - Nhận `config` và `save_path` làm tham số (không hardcode)
+
+**🟡 C:**
+- Chạy thử `data/preprocess.py` trên dataset thật
+- Kiểm tra file `.npy` output có đúng format không
+- Report bug nếu có
+
+**✅ Deliverable:** `dataset.py` xong, `engine/trainer.py` draft
+
+---
+
+### 🗓️ Ngày 5 — Configs & Evaluator
+
+**🔵 A:**
+- Viết `configs/` package:
+  - `configs/model_config.py`: ViT architecture configs (b16, b32, l16...)
+  - `configs/train_config.py`: training hyperparameters
+  - `configs/__init__.py`: export `get_train_config()`, `get_eval_config()`
+
+**🟢 B:**
+- Viết `engine/evaluator.py`:
+  - Tách `test_all_scenes()` ra file riêng
+  - Thêm param `label_map_path` để load nhãn mới
+  - Tính AUC theo từng nhãn (per-class AUC)
+
+**🟡 C:**
+- Kiểm thử `data/label_map.py`:
+  - Tạo array test cases: `[0, 0, 3, 2, 9, 5, 7]`
+  - Xác nhận output đúng: `[0, 0, 1, 2, 3, -1, -1]`
+  - Ghi test case vào `data/test_label_map.py`
+
+**✅ Deliverable:** `configs/` xong, `engine/evaluator.py` draft, label_map được kiểm thử
+
+---
+
+### 🗓️ Ngày 6 — Tích hợp pipeline
+
+**🔵 A:**
+- Tích hợp toàn bộ data pipeline:
+  - `configs/` → `data/dataset.py` → `engine/trainer.py` hoạt động cùng nhau
+  - Test import: `from data.dataset import DataLoader` không lỗi
+  - Fix path issues (relative → absolute, Windows/Linux)
+
+**🟢 B:**
+- Bắt đầu viết `scripts/train_STE_TTE.py`:
+  - Import từ `models/`, `engine/`, `configs/`, `data/`
+  - Không còn hardcode paths
+  - Thêm `argparse` cho `--data-dir`, `--output-dir`, `--num-classes=3`
+
+**🟡 C:**
+- Hỗ trợ A debug tích hợp
+- Test thử import toàn bộ module từ root:
+  ```python
+  from configs import get_train_config
+  from data import DataLoader, LABEL_MAP
+  from models import VisionTransformer
+  ```
+- Ghi lại lỗi gặp phải
+
+**✅ Deliverable:** Pipeline import được, `scripts/train_STE_TTE.py` draft
+
+---
+
+### 🗓️ Ngày 7 — Scripts & Unit tests
+
+**🔵 A:**
+- Viết unit test cho `data/`:
+  - `test_label_map.py`: kiểm thử remap function
+  - `test_dataset.py`: kiểm thử DataLoader load ảnh
+- Dùng `pytest` hoặc `assert` đơn giản
+
+**🟢 B:**
+- Viết thêm các scripts còn lại:
+  - `scripts/train_UIT_ADrone.py`
+  - `scripts/train_baseline_ca.py`
+- Đảm bảo tất cả script dùng `--num-classes 3`
+
+**🟡 C:**
+- Chuẩn bị lệnh chạy experiment:
+  ```bash
+  python scripts/train_STE_TTE.py \
+    --train 1 \
+    --num-classes 3 \
+    --data-dir ../../UIT-ADrone \
+    --exp-name exp_3cls_v1
+  ```
+- Kiểm tra GPU available, CUDA version
+- Chuẩn bị template ghi kết quả
+
+**✅ Deliverable:** Scripts đầy đủ, unit tests pass, lệnh chạy sẵn sàng
+
+---
+
+### 🗓️ Ngày 8 — Dry run & Fix bugs
+
+**🔵 A:**
+- Hỗ trợ fix bug liên quan đến data pipeline khi chạy thật
+- Đảm bảo `outputs/` structure tự tạo đúng:
+  ```
+  outputs/exp_3cls_v1/
+  ├── checkpoints/
+  ├── logs/
+  └── predictions/
+  ```
+
+**🟢 B:**
+- Chạy **dry run** (1-2 epoch) với model STE-TTE + 3 nhãn
+- Ghi log: loss có giảm không, không crash
+- Fix import errors nếu còn sót
+
+**🟡 C:**
+- Theo dõi log training, ghi lại:
+  - Reconstruction loss theo epoch
+  - Có warning/error không
+- Bắt đầu viết bảng so sánh kết quả
+
+**✅ Deliverable:** Training chạy được 2 epoch không crash
+
+---
+
+### 🗓️ Ngày 9 — Evaluation & Kết quả
+
+**🔵 A:**
+- Viết `requirements.txt`:
+  ```
+  torch>=1.10
+  torchvision
+  numpy
+  opencv-python
+  scikit-learn
+  tqdm
+  tensorboard
+  ```
+- Kiểm tra môi trường fresh install có hoạt động không
+
+**🟢 B:**
+- Chạy evaluation `test_all_scenes` với nhãn 3 class
+- Tính AUC tổng và per-class AUC cho 3 nhãn
+- Lưu kết quả vào `outputs/exp_3cls_v1/results.json`
+
+**🟡 C:**
+- Phân tích kết quả:
+  - AUC của từng nhãn cao/thấp như thế nào?
+  - So sánh với baseline (nếu có)
+  - Vẽ ROC curve cho 3 nhãn
+
+**✅ Deliverable:** Kết quả AUC 3 nhãn, `requirements.txt`, ROC curve
+
+---
+
+### 🗓️ Ngày 10 — Hoàn thiện & Tổng kết
+
+**🔵 A:**
+- Code review toàn bộ `data/`, `configs/`
+- Xoá các file cũ không còn dùng (hoặc move vào `archive/`)
+- Đảm bảo không còn hardcode path
+
+**🟢 B:**
+- Fix bugs cuối cùng
+- Dọn dẹp `engine/`, `scripts/`, `models/`
+- Đảm bảo mọi script có `--help` hoạt động
+
+**🟡 C:**
+- Viết lại `README.md`:
+  - Mô tả 3 nhãn mới
+  - Hướng dẫn cài đặt
+  - Hướng dẫn train & eval
+  - Kết quả thực nghiệm
+
+**✅ Deliverable cuối:** Project hoàn chỉnh, README đầy đủ, kết quả có thể reproduce
+
+---
+
+## Phụ thuộc giữa các task (Critical Path)
+
+```
+Ngày 1 (A: cấu trúc) ──→ Ngày 2 (A: label_map) ──→ Ngày 3 (A: preprocess)
+                                                              ↓
+Ngày 1 (B: nghiên cứu) ──→ Ngày 2-3 (B: models/) ──→ Ngày 4 (B: trainer)
+                                                              ↓
+                                            Ngày 6 (A+B: Tích hợp) ──→ Ngày 8 (B: dry run) ──→ Ngày 9 (B: eval)
+```
+
+---
+
+> [!NOTE]
+> Lịch này giả sử dataset UIT-ADrone đã có sẵn. Nếu chưa có, Ngày 1-2 cần thêm bước download/setup dataset.
+</file>
+
+<file path="data/dataset.py">
+import numpy as np
+import os
+import glob
+import cv2
+import torch.utils.data as data
+
+def np_load_frame(filename, resize_height, resize_width):
+    """
+    Load image path and convert it to numpy.ndarray.
+    """
+    image_decoded = cv2.imread(filename)
+    h, w, _ = image_decoded.shape
+    image_resized = cv2.resize(image_decoded, (resize_width, resize_height))
+    image_resized = image_resized.astype(dtype=np.float32)
+    image_resized = (image_resized / 127.5) - 1.0
+    return image_resized, h, w
+
+class DataLoader(data.Dataset):
+    """Dataset for loading video frames and returning two resolutions.
+
+    Args:
+        video_folder: Root folder containing frames or subfolders of frames.
+        transform: Callable applied to each frame (expects CHW tensors).
+        resize_height: Target height for standard frames.
+        resize_width: Target width for standard frames.
+        time_step: Number of input frames per sample.
+        num_pred: Number of prediction frames per sample.
+        label_map: Optional label mapping for supervised/label-aware use.
+
+    Returns:
+        dict with keys:
+            "256": np.ndarray, shape (time_step + num_pred, 3, 256, 256)
+            "standard": np.ndarray, shape (time_step + num_pred, 3, resize_height, resize_width)
+    """
+    def __init__(self, video_folder, transform, resize_height, resize_width, time_step=4, num_pred=1, label_map=None):
+        self.dir = video_folder
+        self.transform = transform
+        self.video_frames = []
+        self._resize_height = resize_height
+        self._resize_width = resize_width
+        self._time_step = time_step
+        self._num_pred = num_pred
+        self.index_samples = []
+        
+        # Gán tham số label_map
+        self.label_map = label_map
+        
+        self.setup()
+
+    def setup(self):
+        videos = glob.glob(os.path.join(self.dir, '*'))
+        videos.sort()
+        if os.path.isdir(videos[0]):
+            all_video_frames = []
+            for video in videos:
+                vide_frames = glob.glob(os.path.join(video, '*.jpg'))
+                vide_frames.sort(key=lambda x: int(os.path.basename(x).split('.')[0].split('_')[-1]))
+                if len(all_video_frames) == 0:
+                    all_video_frames = vide_frames
+                else:
+                    all_video_frames += vide_frames
+        else:
+            videos.sort(key=lambda x: int(os.path.basename(x).split('.')[0].split('_')[-1]))
+            all_video_frames = videos
+        
+        self.video_frames = all_video_frames
+        self.index_samples = list(range(len(all_video_frames)-self._time_step))
+
+    def __getitem__(self, index):
+        frame_index = self.index_samples[index]
+        batch_frames_512 = np.zeros((self._time_step+self._num_pred, 3, 256, 256))
+        batch_frames = np.zeros((self._time_step+self._num_pred, 3, self._resize_height, self._resize_width))
+
+        for i in range(self._time_step + self._num_pred):
+            image_512, h, w = np_load_frame(self.video_frames[frame_index + i], 256, 256)
+            image, h, w = np_load_frame(self.video_frames[frame_index + i], self._resize_height,
+                                  self._resize_width)
+
+            if self.transform is not None:
+                batch_frames_512[i] = self.transform(image_512)
+                batch_frames[i] = self.transform(image)
+            
+        return {
+            '256': batch_frames_512,
+            'standard': batch_frames
+        }
+
+    def __len__(self):
+        return len(self.index_samples)
+</file>
+
 <file path="models/utils.py">
 import os
 import json
@@ -530,14 +2144,15 @@ def process_config(config):
     exp_name += ('_' + timestamp)
 
     # create some important directories to be used for that experiments
-    config.summary_dir = os.path.join('experiments', 'tb', exp_name)
-    config.checkpoint_dir = os.path.join('experiments', 'save', exp_name, 'checkpoints/')
-    config.result_dir = os.path.join('experiments', 'save', exp_name, 'results/')
+    base_dir = config.save_dir if getattr(config, 'save_dir', None) else 'experiments'
+    config.summary_dir = os.path.join(base_dir, 'tb', exp_name)
+    config.checkpoint_dir = os.path.join(base_dir, 'save', exp_name, 'checkpoints/')
+    config.result_dir = os.path.join(base_dir, 'save', exp_name, 'results/')
     for dir in [config.summary_dir, config.checkpoint_dir, config.result_dir]:
         ensure_dir(dir)
 
     # save config
-    write_json(vars(config), os.path.join('experiments', 'save', exp_name, 'config.json'))
+    write_json(vars(config), os.path.join(base_dir, 'save', exp_name, 'config.json'))
 
     return config
 
@@ -1044,328 +2659,6 @@ if __name__ == '__main__':
         print("{}: {}".format(key, value.shape))
 </file>
 
-<file path="models/vit_original.py">
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import pdb
-
-class PositionEmbs(nn.Module):
-    def __init__(self, num_patches, emb_dim, dropout_rate=0.1):
-        super(PositionEmbs, self).__init__()
-        # self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, emb_dim))
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, emb_dim))
-        if dropout_rate > 0:
-            self.dropout = nn.Dropout(dropout_rate)
-        else:
-            self.dropout = None
-
-    def forward(self, x):
-        
-        out = x + self.pos_embedding
-
-        if self.dropout:
-            out = self.dropout(out)
-
-        return out
-
-
-class MlpBlock(nn.Module):
-    """ Transformer Feed-Forward Block """
-    def __init__(self, in_dim, mlp_dim, out_dim, dropout_rate=0.1):
-        super(MlpBlock, self).__init__()
-
-        # init layers
-        self.fc1 = nn.Linear(in_dim, mlp_dim)
-        self.fc2 = nn.Linear(mlp_dim, out_dim)
-        self.act = nn.GELU()
-        if dropout_rate > 0.0:
-            self.dropout1 = nn.Dropout(dropout_rate)
-            self.dropout2 = nn.Dropout(dropout_rate)
-        else:
-            self.dropout1 = None
-            self.dropout2 = None
-
-    def forward(self, x):
-
-        out = self.fc1(x)
-        out = self.act(out)
-        if self.dropout1:
-            out = self.dropout1(out)
-
-        out = self.fc2(out)
-        out = self.dropout2(out)
-        return out
-
-
-class LinearGeneral(nn.Module):
-    def __init__(self, in_dim=(768,), feat_dim=(12, 64)):
-        super(LinearGeneral, self).__init__()
-
-        self.weight = nn.Parameter(torch.randn(*in_dim, *feat_dim))
-        self.bias = nn.Parameter(torch.zeros(*feat_dim))
-
-    def forward(self, x, dims):
-        a = torch.tensordot(x, self.weight, dims=dims) + self.bias
-        return a
-
-
-class SelfAttention(nn.Module):
-    def __init__(self, in_dim, heads=8, dropout_rate=0.1):
-        super(SelfAttention, self).__init__()
-        self.heads = heads
-        self.head_dim = in_dim // heads
-        self.scale = self.head_dim ** 0.5
-
-        self.query = LinearGeneral((in_dim,), (self.heads, self.head_dim))
-        self.key = LinearGeneral((in_dim,), (self.heads, self.head_dim))
-        self.value = LinearGeneral((in_dim,), (self.heads, self.head_dim))
-        self.out = LinearGeneral((self.heads, self.head_dim), (in_dim,))
-
-        if dropout_rate > 0:
-            self.dropout = nn.Dropout(dropout_rate)
-        else:
-            self.dropout = None
-
-    def forward(self, x):
-        b, n, _ = x.shape
-
-        q = self.query(x, dims=([2], [0]))
-        k = self.key(x, dims=([2], [0]))
-        v = self.value(x, dims=([2], [0]))
-
-        q = q.permute(0, 2, 1, 3)
-        k = k.permute(0, 2, 1, 3)
-        v = v.permute(0, 2, 1, 3)
-
-        attn_weights = torch.matmul(q, k.transpose(-2, -1)) / self.scale
-        attn_weights = F.softmax(attn_weights, dim=-1)
-        out = torch.matmul(attn_weights, v)
-        out = out.permute(0, 2, 1, 3)
-
-        out = self.out(out, dims=([2, 3], [0, 1]))
-
-        return out
-
-
-class EncoderBlock(nn.Module):
-    def __init__(self, in_dim, mlp_dim, num_heads, dropout_rate=0.1, attn_dropout_rate=0.1):
-        super(EncoderBlock, self).__init__()
-
-        self.norm1 = nn.LayerNorm(in_dim)
-        self.attn = SelfAttention(in_dim, heads=num_heads, dropout_rate=attn_dropout_rate)
-        if dropout_rate > 0:
-            self.dropout = nn.Dropout(dropout_rate)
-        else:
-            self.dropout = None
-        self.norm2 = nn.LayerNorm(in_dim)
-        self.mlp = MlpBlock(in_dim, mlp_dim, in_dim, dropout_rate)
-
-    def forward(self, x):
-        residual = x
-        out = self.norm1(x)
-        out = self.attn(out)
-        if self.dropout:
-            out = self.dropout(out)
-        out += residual
-        residual = out
-
-        out = self.norm2(out)
-        out = self.mlp(out)
-        out += residual
-        return out
-
-
-class Encoder(nn.Module):
-    def __init__(self, num_patches, emb_dim, mlp_dim, num_layers=12, num_heads=12, dropout_rate=0.1, attn_dropout_rate=0.0):
-        super(Encoder, self).__init__()
-
-        # positional embedding
-        self.pos_embedding = PositionEmbs(num_patches, emb_dim, dropout_rate)
-
-        # encoder blocks
-        in_dim = emb_dim
-        self.encoder_layers = nn.ModuleList()
-        for i in range(num_layers):
-            layer = EncoderBlock(in_dim, mlp_dim, num_heads, dropout_rate, attn_dropout_rate)
-            self.encoder_layers.append(layer)
-        self.norm = nn.LayerNorm(in_dim)
-
-    def forward(self, x):
-
-        out = self.pos_embedding(x)
-
-        for layer in self.encoder_layers:
-            out = layer(out)
-
-        out = self.norm(out)
-        return out
-
-
-class Decoder(nn.Module):
-    def __init__(self, z_dim=512):
-        super(Decoder, self).__init__()
-        self.z_dim = z_dim
-
-        def Basic(intInput, intOutput):
-            return torch.nn.Sequential(
-                torch.nn.Conv2d(in_channels=intInput, out_channels=intOutput, kernel_size=3, stride=1, padding=1),
-                torch.nn.BatchNorm2d(intOutput),
-                torch.nn.ReLU(inplace=False),
-                torch.nn.Conv2d(in_channels=intOutput, out_channels=intOutput, kernel_size=3, stride=1, padding=1),
-                torch.nn.BatchNorm2d(intOutput),
-                torch.nn.ReLU(inplace=False)
-            )
-
-        def Gen(intInput, intOutput, nc):
-            return torch.nn.Sequential(
-                torch.nn.Conv2d(in_channels=intInput, out_channels=nc, kernel_size=3, stride=1, padding=1),
-                torch.nn.BatchNorm2d(nc),
-                torch.nn.ReLU(inplace=False),
-                torch.nn.Conv2d(in_channels=nc, out_channels=nc, kernel_size=3, stride=1, padding=1),
-                torch.nn.BatchNorm2d(nc),
-                torch.nn.ReLU(inplace=False),
-                torch.nn.Conv2d(in_channels=nc, out_channels=intOutput, kernel_size=3, stride=1, padding=1),
-                torch.nn.Tanh()
-            )
-
-        def Upsample(nc, intOutput):
-            return torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(in_channels=nc, out_channels=intOutput, kernel_size=3, stride=2, padding=1,
-                                         output_padding=1),
-                torch.nn.BatchNorm2d(intOutput),
-                torch.nn.ReLU(inplace=False)
-            )
-
-        def Upsample2(nc, intOutput):
-            return torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(in_channels=nc, out_channels=intOutput, kernel_size=4, stride=4, padding=1,
-                                         output_padding=2),
-                torch.nn.BatchNorm2d(intOutput),
-                torch.nn.ReLU(inplace=False)
-            )
-
-        self.decoder = nn.Sequential(
-            # Basic(2048, 1024),
-            # Upsample(1024, 1024),
-            # Basic(1024, 512),
-            # Upsample(512, 512),
-            # Basic(512, 256),
-            # Upsample(256, 256),
-            Basic(256, 128),
-            Upsample(128, 128),
-            Basic(128, 64),
-            Upsample(64, 64),
-            Upsample2(64, 64),
-            Gen(64, 3, 32),
-        )
-
-        self.de_dense = nn.Sequential(
-            nn.Linear(768, 256 * 16 * 16),
-            nn.ELU(),
-        )
-
-    def forward(self, x):
-        output = self.de_dense(x)
-        output = output.view(x.size(0), 256, 16, 16)
-        output = self.decoder(output)
-        return output
-
-class VisionTransformer(nn.Module):
-    """ Vision Transformer """
-    def __init__(self,
-                 image_size=(256, 256),
-                 patch_size=(16, 16),
-                 emb_dim=768,
-                 mlp_dim=3072,
-                 num_heads=12,
-                 num_layers=12,
-                 num_classes=1000,
-                 attn_dropout_rate=0.0,
-                 dropout_rate=0.1,
-                 num_frames=4,
-                 nu=0.01,
-                 feat_dim=None):
-        super(VisionTransformer, self).__init__()
-        h, w = image_size
-
-        # embedding layer
-        fh, fw = patch_size
-        gh, gw = h // fh, w // fw
-        num_patches = gh * gw * num_frames
-        self.embedding = nn.Conv2d(3, emb_dim, kernel_size=(fh, fw), stride=(fh, fw))
-        # class token
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_dim))
-
-        # transformer
-        self.transformer = Encoder(
-            num_patches=num_patches,
-            emb_dim=emb_dim,
-            mlp_dim=mlp_dim,
-            num_layers=num_layers,
-            num_heads=num_heads,
-            dropout_rate=dropout_rate,
-            attn_dropout_rate=attn_dropout_rate)
-
-        #Decoder
-        self.decoder = Decoder()
-
-        #Maxpooling
-
-        self.maxpooling = nn.MaxPool1d(num_frames, stride=num_frames)
-
-        #Sphere
-        self.nu = nu
-        self.radius = torch.nn.Parameter(torch.tensor([0.0]))
-        self.center = torch.nn.Parameter(torch.randn(emb_dim))
-
-        # classfier
-        self.classifier = nn.Linear(emb_dim, num_classes)
-
-    def forward(self, x): # x: (b, n, c, h, w)
-        x = x.float().cuda()
-        for i in range(x.shape[1]):
-            emb = self.embedding(x[:, i])
-            emb = emb.permute(0, 2, 3, 1)
-            b, h, w, c = emb.shape
-            emb = emb.reshape(b, h * w, c)
-            if i == 0:
-                all_emb = emb
-            else:
-                all_emb = torch.cat((emb, all_emb), 1)  # (b, h*w*n, c)
-        # emb = self.embedding(x)     # (n, c, gh, gw)
-        # emb = emb.permute(0, 2, 3, 1)  # (n, gh, hw, c)
-        # b, h, w, c = emb.shape
-        # emb = emb.reshape(b, h * w, c)
-
-        b, n, c = all_emb.shape
-
-        # prepend class token
-        cls_token = self.cls_token.repeat(b, 1, 1)
-        emb = torch.cat([cls_token, all_emb], dim=1)
-
-        # transformer
-        feat = self.transformer(emb)
-        #decoder
-        output = self.decoder(feat[:, 0, :])
-
-        # classifier
-        # logits = self.classifier(feat[:, 0])
-        return output
-
-
-if __name__ == '__main__':
-    model = VisionTransformer(num_layers=2)
-    x = torch.randn((2, 3, 256, 256))
-    out = model(x)
-
-    state_dict = model.state_dict()
-
-    for key, value in state_dict.items():
-        print("{}: {}".format(key, value.shape))
-</file>
-
 <file path="models/vit_ste_tte.py">
 import torch
 import torch.nn as nn
@@ -1719,22 +3012,61 @@ class VisionTransformer(nn.Module):
         self.center = torch.nn.Parameter(torch.randn(emb_dim))
         # self.cross_att = CrossAttention(768, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.)
 
-    def forward(self, x): # x: (b, n, c, h, w)
-        x = x.float().cuda()
+    def forward(self, x):
+        """
+        Forward pass của STE-TTE VisionTransformer (Spatial-Temporal Encoder + Decoder).
+
+        Kiến trúc:
+          1. Spatial Transformer (STE): Với mỗi frame trong chuỗi, trích xuất
+             CLS token đại diện cho đặc trưng không gian của frame đó.
+          2. Temporal Transformer (TTE): Nhận chuỗi CLS token theo thời gian,
+             thêm một learnable CLS token đầu chuỗi, rồi encode toàn bộ
+             chuỗi để nắm bắt quan hệ thời gian.
+          3. Decoder: Từ CLS token đầu ra của TTE, reconstruct lại ảnh.
+             Dùng để tính MSE reconstruction loss cho unsupervised anomaly detection.
+
+        Args:
+            x (Tensor): Input video clip, shape (B, N, C, H, W)
+                        B = batch size, N = số frames, C = số kênh màu (3),
+                        H = chiều cao ảnh, W = chiều rộng ảnh.
+
+        Returns:
+            output (Tensor): Ảnh được reconstruct, shape (B, 3, 256, 256).
+                             Dùng để tính MSE loss với ảnh gốc.
+        """
+        # Fix: dùng .to(device) thay vì hardcode .cuda()
+        # để tương thích với cả CPU, multi-GPU và các device khác
+        device = next(self.parameters()).device
+        x = x.float().to(device)
+
+        # Spatial Transformer Encoder (STE):
+        # Với mỗi frame i, trích xuất CLS token spatial rồi ghép lại thành chuỗi
         for i in range(x.shape[1]):
-            spatial_cls_token = self.spatial_transformer(x[:, i]).unsqueeze(1)
+            spatial_cls_token = self.spatial_transformer(x[:, i]).unsqueeze(1)  # (B, 1, emb_dim)
             if i == 0:
                 all_spatial_cls_token = spatial_cls_token
             else:
-                all_spatial_cls_token = torch.cat((spatial_cls_token, all_spatial_cls_token), 1)
+                all_spatial_cls_token = torch.cat((spatial_cls_token, all_spatial_cls_token), 1)  # (B, N, emb_dim)
 
         b, n, c = all_spatial_cls_token.shape
-        # prepend class token
-        cls_token = self.cls_token.repeat(b, 1, 1)
-        emb = torch.cat([cls_token, all_spatial_cls_token], dim=1)
-        emb = self.temporal_transformer(emb)
-        emb = emb[:,0,:].unsqueeze(1)
-        output = self.decoder(emb)
+
+        # Temporal Transformer Encoder (TTE):
+        # Prepend learnable CLS token vào đầu chuỗi spatial tokens
+        cls_token = self.cls_token.repeat(b, 1, 1)  # (B, 1, emb_dim)
+        emb = torch.cat([cls_token, all_spatial_cls_token], dim=1)  # (B, N+1, emb_dim)
+        emb = self.temporal_transformer(emb)  # (B, N+1, emb_dim)
+
+        # Lấy CLS token ở vị trí 0 làm đại diện toàn bộ clip
+        emb = emb[:, 0, :].unsqueeze(1)  # (B, 1, emb_dim)
+
+        # Decoder: reconstruct ảnh từ embedding
+        output = self.decoder(emb)  # (B, 3, 256, 256)
+
+        # Kiểm tra output shape: phải là (B, 3, 256, 256)
+        assert output.shape[1:] == (3, 256, 256), (
+            f"Decoder output shape sai: expected (B, 3, 256, 256), got {tuple(output.shape)}"
+        )
+
         return output
 
 if __name__ == '__main__':
@@ -1748,426 +3080,45 @@ if __name__ == '__main__':
         print("{}: {}".format(key, value.shape))
 </file>
 
-<file path="PHAN_CONG_NHANH.md">
-# 🚀 TrafficVision-Transformer — Phân Công Nhanh (3 Người × 3 Ngày)
-
-> **Bài toán:** Unsupervised Anomaly Detection | **Metric:** AUC-ROC | **Loss:** MSE reconstruction
-
----
-
-## 📁 Cấu Trúc Thư Mục Hiện Tại
-
-```
-TrafficVision-Transformer/
-│
-├── compute_auc.py                   ← [P1] Đã tạo sẵn — test + push cuối Ngày 2
-│
-├── configs/
-│   ├── train_config.py              ← [P1] ✅ Đã xong (đầy đủ args + model arch)
-│   └── model_config.py
-│
-├── data/
-│   └── dataset.py                   ← [P1] Fix bug shape dòng 56 + thêm docstring
-│
-├── engine/
-│   ├── trainer.py                   ← ✅ Đã cleanup (bỏ acc1s/acc5s → auc)
-│   └── checkpoint.py                ← ✅ Đã tạo (bỏ jax dependency)
-│
-├── models/
-│   ├── vit_ste_tte.py               ← [P2] Thêm docstring + fix .cuda() → .to(device)
-│   ├── vit_baseline_ca.py           ← [P3] Thêm docstring so sánh với STE-TTE
-│   ├── vit_original.py
-│   └── utils.py
-│
-├── scripts/
-│   ├── train_ste_tte.py             ← [P2] ✅ Sẵn sàng chạy (import đã đúng)
-│   └── train_baseline_ca.py         ← [P3] ✅ Sẵn sàng chạy (import đã đúng)
-│
-├── experiments_andt_ADrone_STE_TTE/          ← Output P2
-│   └── checkpoints/ (best.pth, current.pth)
-│
-├── experiments_andt_ADrone_baseline_CA/      ← Output P3
-│   └── checkpoints/ (best.pth, current.pth)
-│
-├── results/                         ← [P3]
-│   ├── visualize.py                 ← ✅ Đã tạo sẵn, test Ngày 2, chạy Ngày 3
-│   ├── comparison_table.md          ← Template — điền kết quả Ngày 3
-│   └── roc_comparison.png           ← Output sau khi chạy visualize.py
-│
-├── training_log_ste_tte.txt         ← Auto-tạo khi P2 train
-├── training_log_baseline.txt        ← Auto-tạo khi P3 train
-└── README.md                        ← [P1] Viết Ngày 3
-```
-
----
-
-## 📅 Timeline 3 Ngày
-
-### 🗓 Ngày 1 — Cleanup & Setup Code
-
-| | **Người 1** | **Người 2** | **Người 3** |
-|---|---|---|---|
-| **Nhiệm vụ** | Fix data pipeline | Document + fix STE-TTE model | Document baseline CA |
-| **Files** | `data/dataset.py` | `models/vit_ste_tte.py` | `models/vit_baseline_ca.py` |
-
-**Người 1:**
-- Fix bug trong `data/dataset.py` dòng 56:
-  ```python
-  # SAI (width/height bị hoán vị):
-  batch_frames = np.zeros((..., self._resize_width, self._resize_height))
-  # ĐÚNG:
-  batch_frames = np.zeros((..., self._resize_height, self._resize_width))
-  ```
-- Thêm docstring vào class `DataLoader`
-
-**Người 2:**
-- Thêm docstring vào `VisionTransformer.forward()` trong `models/vit_ste_tte.py`
-- Fix hardcode cuda:
-  ```python
-  # Đổi: x = x.float().cuda()
-  # Thành: x = x.float().to(device)
-  ```
-- Kiểm tra decoder output shape đúng `(B, 3, 256, 256)`
-
-**Người 3:**
-- Thêm docstring đầu file `models/vit_baseline_ca.py` (giải thích khác biệt vs STE-TTE)
-- Đọc + review `scripts/train_baseline_ca.py`
-
----
-
-### 🗓 Ngày 2 — Training
-
-| | **Người 1** | **Người 2** | **Người 3 (sáng)** | **Người 3 (chiều)** |
-|---|---|---|---|---|
-| **Nhiệm vụ** | ⚡ Push `compute_auc.py` → fix `dataset.py` | Train STE-TTE cả ngày | Train Baseline CA | Test `results/visualize.py` |
-| **Output** | `compute_auc.py` trên git | `training_log_ste_tte.txt` | `training_log_baseline.txt` | `visualize.py` ready |
-
-> ⚠️ **Người 1 phải push `compute_auc.py` trước cuối Ngày 2** — Người 2 và 3 cần nó vào Ngày 3!
-
-**Lệnh train — Người 2:**
-```bash
-python scripts/train_ste_tte.py \
-    --train 1 \
-    --epochs 5 \
-    --batch-size 8 \
-    --lr 1e-4 \
-    --model-arch b16 \
-    --image-size 384 \
-    --data-dir ../../UIT-ADrone
-```
-
-**Lệnh train — Người 3:**
-```bash
-python scripts/train_baseline_ca.py \
-    --train 1 \
-    --epochs 5 \
-    --batch-size 8 \
-    --lr 1e-4 \
-    --model-arch b16 \
-    --image-size 384 \
-    --data-dir ../../UIT-ADrone
-```
-
----
-
-### 🗓 Ngày 3 — Inference, Kết Quả & Báo Cáo
-
-| | **Người 1** | **Người 2** | **Người 3** |
-|---|---|---|---|
-| **Nhiệm vụ** | Viết README | Inference + tính AUC STE-TTE | Inference Baseline + tổng hợp + ROC |
-| **Output** | `README.md` | AUC score STE-TTE | `comparison_table.md`, `roc_comparison.png` |
-
-**Người 2 — Ngày 3:**
-```bash
-# 1. Inference
-python scripts/train_ste_tte.py --train 0 --data-dir ../../UIT-ADrone
-
-# 2. Tính AUC
-python compute_auc.py \
-    --scores-dir experiments_andt_ADrone_STE_TTE/ \
-    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
-    --plot --save-plot results/roc_ste_tte.png
-```
-
-**Người 3 — Ngày 3:**
-```bash
-# 1. Inference
-python scripts/train_baseline_ca.py --train 0 --data-dir ../../UIT-ADrone
-
-# 2. Tính AUC
-python compute_auc.py \
-    --scores-dir experiments_andt_ADrone_baseline_CA/ \
-    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
-    --plot --save-plot results/roc_baseline.png
-
-# 3. Vẽ ROC comparison (sau khi cả 2 model đã xong)
-python results/visualize.py
-
-# 4. Điền kết quả vào results/comparison_table.md
-```
-
----
-
-## 🔗 Dependency Chain
-
-```
-P1: compute_auc.py ──(push cuối Ngày 2)──┐
-                                          ├──► P2 Ngày 3 → AUC STE-TTE
-                                          └──► P3 Ngày 3 → AUC Baseline
-                                                      │
-                                                      ▼
-                                          P3: comparison_table.md
-                                              roc_comparison.png
-```
-
----
-
-## ⚙️ Bảng File Ownership
-
-| File | Người phụ trách | Trạng thái |
-|---|---|---|
-| `data/dataset.py` | **P1** | ⬜ Fix bug dòng 56 + docstring |
-| `compute_auc.py` | **P1** | ⬜ Test + push Ngày 2 |
-| `configs/train_config.py` | **P1** | ✅ Xong |
-| `README.md` | **P1** | ⬜ Viết Ngày 3 |
-| `models/vit_ste_tte.py` | **P2** | ⬜ Docstring + fix `.cuda()` |
-| `scripts/train_ste_tte.py` | **P2** | ✅ Sẵn sàng chạy |
-| `models/vit_baseline_ca.py` | **P3** | ⬜ Docstring |
-| `scripts/train_baseline_ca.py` | **P3** | ✅ Sẵn sàng chạy |
-| `results/visualize.py` | **P3** | ✅ Đã tạo, test Ngày 2 |
-| `results/comparison_table.md` | **P3** | ⬜ Điền Ngày 3 |
-| `engine/trainer.py` | — | ✅ Đã cleanup |
-| `engine/checkpoint.py` | — | ✅ Đã tạo |
-
-> **Lưu ý:** File `.npy` trong `experiments_andt_ADrone_STE_TTE/` và `experiments_andt_ADrone_baseline_CA/` — **ĐỪNG XÓA** sau khi test, cần để tính AUC và vẽ biểu đồ.
-</file>
-
-<file path="README.md">
-# TrafficVision-Transformer
-</file>
-
-<file path="results/comparison_table.md">
-## Kết quả so sánh trên UIT-ADrone Dataset
-
-| Model | AUC-ROC | Training Time | #Params |
-|---|---|---|---|
-| Baseline (CA) | ? | ? | ? |
-| Proposed (STE-TTE) | ? | ? | ? |
-| Paper reported | ~0.xx | — | — |
-
-> Điền vào sau khi chạy xong inference + `compute_auc.py`
-
----
-
-## Cách tính kết quả
-
-```bash
-# STE-TTE
-python compute_auc.py \
-    --scores-dir experiments_andt_ADrone_STE_TTE/ \
-    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
-    --plot --save-plot results/roc_ste_tte.png
-
-# Baseline CA
-python compute_auc.py \
-    --scores-dir experiments_andt_ADrone_baseline_CA/ \
-    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
-    --plot --save-plot results/roc_baseline.png
-
-# Vẽ comparison plot
-python results/visualize.py
-```
-
----
-
-## Notes
-
-- AUC-ROC cao hơn = model phát hiện anomaly tốt hơn
-- Kết quả bị ảnh hưởng bởi: số epoch, learning rate, image size
-- Training chỉ dùng **normal frames** (unsupervised)
-</file>
-
-<file path="results/visualize.py">
-"""
-results/visualize.py — Visualization utilities cho anomaly detection
-Người phụ trách: Người 3 (chuẩn bị Ngày 2, chạy Ngày 3)
-
-Usage (sau khi đã có .npy score files từ cả 2 model):
-    python results/visualize.py
-"""
-
+<file path="configs/__init__.py">
 import os
-import numpy as np
-import glob
-import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, auc
+from .train_config import get_train_config, get_eval_config
+from . import model_config
 
-os.makedirs('results', exist_ok=True)
+def print_config(config):
+    message = '\n' + '='*20 + ' CONFIGURATION ' + '='*20 + '\n'
+    for k, v in sorted(vars(config).items()):
+        message += f'{k:>25}: {v:<30}\n'
+    message += '='*55 + '\n'
+    print(message)
 
+def setup_output_dirs(exp_name):
+    """Tự động tạo cấu trúc thư mục lưu trữ cho experiment"""
+    base_dir = os.path.join("outputs", exp_name)
+    dirs_to_make = [
+        os.path.join(base_dir, "checkpoints"),
+        os.path.join(base_dir, "logs"),
+        os.path.join(base_dir, "predictions")
+    ]
+    for d in dirs_to_make:
+        os.makedirs(d, exist_ok=True)
+    print(f"[*] Đã tự động khởi tạo cấu trúc thư mục tại: {base_dir}")
 
-# ─── ROC Curve Comparison ──────────────────────────────────────────────────────
+def get_train_config():
+    config = get_train_args()
+    config = getattr(model_config, f"get_{config.model_arch}_config")(config)
+    
+    # Gọi hàm tự động tạo thư mục output dựa theo tên experiment
+    setup_output_dirs(config.exp_name)
+    
+    print_config(config)
+    return config
 
-def plot_roc_comparison(models: dict, labels, save_path='results/roc_comparison.png'):
-    """
-    Vẽ ROC curve của nhiều model trên cùng 1 plot.
-
-    Args:
-        models: dict {'Model Name': scores_array}
-        labels: ground-truth binary labels array
-        save_path: đường dẫn lưu ảnh
-    """
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    for name, scores in models.items():
-        fpr, tpr, _ = roc_curve(labels, scores)
-        roc_auc = auc(fpr, tpr)
-        ax.plot(fpr, tpr, linewidth=2, label=f'{name} (AUC = {roc_auc:.4f})')
-
-    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random')
-    ax.set_xlabel('False Positive Rate', fontsize=12)
-    ax.set_ylabel('True Positive Rate', fontsize=12)
-    ax.set_title('ROC Curve — UIT-ADrone Anomaly Detection', fontsize=14)
-    ax.legend(fontsize=11)
-    ax.grid(alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    print(f'Saved: {save_path}')
-    plt.close()
-
-
-# ─── Anomaly Score Timeline ────────────────────────────────────────────────────
-
-def plot_score_timeline(scene_name, scores_dir, labels_dir, out_dir='results/'):
-    """
-    Vẽ anomaly score theo thời gian cho 1 video scene.
-
-    Args:
-        scene_name: tên scene (ví dụ: 'DJI_0073')
-        scores_dir: thư mục chứa .npy scores
-        labels_dir: thư mục chứa .npy labels
-        out_dir: thư mục lưu ảnh output
-    """
-    scores = np.load(os.path.join(scores_dir, scene_name + '.npy'))
-    labels = np.load(os.path.join(labels_dir, scene_name + '.npy'), allow_pickle=True)
-
-    # Align length
-    min_len = min(len(scores), len(labels))
-    scores = scores[:min_len]
-    labels = labels[len(labels) - min_len:]
-
-    plt.figure(figsize=(14, 4))
-    plt.plot(scores, label='Anomaly Score (MSE)', color='steelblue', linewidth=1)
-    plt.fill_between(range(len(labels)), 0, scores.max(),
-                     where=(labels == 1), alpha=0.3, color='red', label='Ground Truth Anomaly')
-
-    threshold = np.mean(scores) + np.std(scores)
-    plt.axhline(y=threshold, color='orange', linestyle='--', linewidth=1.5,
-                label=f'Threshold (mean+std) = {threshold:.4f}')
-
-    plt.xlabel('Frame Index')
-    plt.ylabel('MSE Loss')
-    plt.title(f'Anomaly Detection Score — {scene_name}')
-    plt.legend()
-    plt.tight_layout()
-
-    os.makedirs(out_dir, exist_ok=True)
-    save_path = os.path.join(out_dir, f'{scene_name}_scores.png')
-    plt.savefig(save_path, dpi=120)
-    print(f'Saved: {save_path}')
-    plt.close()
-
-
-# ─── Load all scores from a directory ─────────────────────────────────────────
-
-def load_all_scores(scores_dir, labels_dir):
-    """Load và align toàn bộ scores + labels từ một thư mục."""
-    all_scores, all_labels = [], []
-    score_files = sorted(glob.glob(os.path.join(scores_dir, '*.npy')))
-    for sf in score_files:
-        name = os.path.basename(sf)
-        label_path = os.path.join(labels_dir, name)
-        if not os.path.exists(label_path):
-            continue
-        scores = np.load(sf)
-        labels = np.load(label_path, allow_pickle=True)
-        min_len = min(len(scores), len(labels))
-        all_scores.extend(scores[:min_len].tolist())
-        all_labels.extend(labels[len(labels) - min_len:].tolist())
-    return np.array(all_scores), np.array(all_labels)
-
-
-# ─── Main: chạy sau khi có đủ score files từ cả 2 model ─────────────────────
-
-if __name__ == '__main__':
-    LABELS_DIR  = '../../UIT-ADrone/test/test_frame_mask/'
-    STE_TTE_DIR = '../experiments_andt_ADrone_STE_TTE/'
-    BASELINE_DIR = '../experiments_andt_ADrone_baseline_CA/'
-
-    # --- Load scores ---
-    ste_scores, labels = load_all_scores(STE_TTE_DIR, LABELS_DIR)
-    baseline_scores, _ = load_all_scores(BASELINE_DIR, LABELS_DIR)
-
-    # --- Plot ROC comparison ---
-    plot_roc_comparison(
-        models={
-            'Baseline CA':        baseline_scores,
-            'STE-TTE (Proposed)': ste_scores,
-        },
-        labels=labels,
-        save_path='results/roc_comparison.png'
-    )
-
-    # --- Plot score timeline cho từng scene ---
-    scenes = [os.path.splitext(os.path.basename(f))[0]
-              for f in glob.glob(os.path.join(STE_TTE_DIR, '*.npy'))]
-    for scene in scenes:
-        try:
-            plot_score_timeline(scene, STE_TTE_DIR, LABELS_DIR, out_dir='results/scores/')
-        except Exception as e:
-            print(f"[WARN] Skip {scene}: {e}")
-
-    print("\nDone! Visualizations saved to results/")
-</file>
-
-<file path="scripts/test_pipeline.py">
-import os
-import sys
-
-# Thêm thư mục gốc của dự án vào đường dẫn tìm kiếm của Python
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from configs import get_train_config
-from data.dataset import DataLoader
-from torchvision import transforms
-
-def main():
-    print("--- BƯỚC 1: TẢI CẤU HÌNH ---")
-    cfg = get_train_config()
-
-    print("\n--- BƯỚC 2: KHỞI TẠO DATA PIPELINE ---")
-    data_path = os.path.abspath(os.path.join(cfg.data_dir, "train", "frames"))
-    print(f"Đường dẫn tìm kiếm dữ liệu: {data_path}")
-
-    if not os.path.exists(data_path):
-        print(f"\n[CẢNH BÁO] Thư mục '{data_path}' chưa tồn tại trên máy bạn.")
-        print("=> Module import và Config đã thông suốt, nhưng bạn cần chép dataset vào đúng vị trí để test thực tế!")
-        return
-
-    try:
-        transform = transforms.Compose([transforms.ToTensor()])
-        dataset = DataLoader(
-            video_folder=data_path,
-            transform=transform,
-            resize_height=cfg.image_size,
-            resize_width=cfg.image_size,
-            time_step=cfg.num_frames
-        )
-        print(f"\n=> TÍCH HỢP THÀNH CÔNG! Pipeline đã sẵn sàng, load được {len(dataset)} samples.")
-    except Exception as e:
-        print(f"\n=> LỖI TÍCH HỢP: {e}")
-
-if __name__ == '__main__':
-    main()
+def get_eval_config():
+    config = get_eval_args()
+    config = getattr(model_config, f"get_{config.model_arch}_config")(config)
+    print_config(config)
+    return config
 </file>
 
 <file path="scripts/train_baseline_ca.py">
@@ -2199,7 +3150,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Anomaly score: higher MSE = more anomalous
 loss_func_mse = nn.MSELoss(reduction='mean')
-SAVE_PATH = '/content/drive/MyDrive/TrafficVision/experiments_andt_ADrone_baseline_CA/'
+SAVE_PATH = os.environ.get('SAVE_PATH', 'experiments_andt_ADrone_baseline_CA/')
 
 
 def normalize_scores(scores):
@@ -2365,535 +3316,6 @@ if __name__ == '__main__':
     main()
 </file>
 
-<file path="test_import.py">
-from models.vit_ste_tte import *
-
-print("IMPORT OK")
-</file>
-
-<file path="work_schedule_10days.md">
-# 📅 Lịch phân công 3 người × 10 ngày — Project ASTT
-
-## Vai trò
-
-| Người | Ký hiệu | Vai trò chính |
-|-------|---------|--------------|
-| Người A | 🔵 A | **Data & Infrastructure** — cấu trúc thư mục, xử lý nhãn, data pipeline |
-| Người B | 🟢 B | **Model & Training** — model files, engine train/eval, scripts |
-| Người C | 🟡 C | **Experiment & Docs** — chạy thử nghiệm, đánh giá kết quả, README |
-
----
-
-## Bảng tổng quan theo ngày
-
-| Ngày | 🔵 A | 🟢 B | 🟡 C |
-|------|------|------|------|
-| **1** | Tạo cấu trúc thư mục mới | Nghiên cứu code model cũ | Đọc README, liệt kê dataset |
-| **2** | Viết `data/label_map.py` | Tách `models/` từ root | Xác nhận 3 nhãn trong dataset |
-| **3** | Viết `data/preprocess.py` | Tách `models/` (tiếp) | Viết script thống kê nhãn |
-| **4** | Viết `data/dataset.py` | Viết `engine/trainer.py` | Kiểm thử `preprocess.py` |
-| **5** | Viết `configs/` package | Viết `engine/evaluator.py` | Kiểm thử label mapping |
-| **6** | Tích hợp data pipeline | Viết `scripts/train_*.py` | Hỗ trợ debug tích hợp |
-| **7** | Unit test data module | Viết `scripts/train_*.py` (tiếp) | Chuẩn bị lệnh chạy experiment |
-| **8** | Hỗ trợ fix bugs pipeline | Chạy training thử (dry run) | Theo dõi log training |
-| **9** | Viết `requirements.txt` | Chạy evaluation + ghi kết quả | Phân tích kết quả |
-| **10** | Review code toàn bộ | Fix bugs cuối + merge | Viết README mới + báo cáo |
-
----
-
-## Chi tiết từng ngày
-
----
-
-### 🗓️ Ngày 1 — Khởi động & lên kế hoạch
-
-**🔵 A:**
-- Tạo toàn bộ thư mục mới: `configs/`, `data/`, `models/`, `engine/`, `scripts/`, `outputs/`
-- Tạo các file `__init__.py` placeholder
-- Không xoá file cũ, để song song
-
-**🟢 B:**
-- Đọc kỹ 3 model files: `model_original.py`, `model_ste_tte.py`, `model_baseline_ca.py`
-- Ghi chú các import dependency, interface giữa các file
-- Lập danh sách thay đổi cần làm khi chuyển vào `models/`
-
-**🟡 C:**
-- Đọc `README.md` và dataset description
-- Liệt kê 10 nhãn anomaly gốc với tên đầy đủ
-- Xác nhận lại với nhóm: nhãn 2, 3, 9 là gì, có đúng file `.npy` không
-
-**✅ Deliverable cuối ngày 1:** Thư mục mới tồn tại, danh sách nhãn được xác nhận
-
----
-
-### 🗓️ Ngày 2 — Label mapping & Model tách
-
-**🔵 A:**
-- Viết `data/label_map.py` hoàn chỉnh:
-  - Dict `LABEL_MAP = {3: 0, 2: 1, 9: 2}`
-  - Hàm `remap_label_array(arr)`
-  - Hàm `filter_frames_by_labels(arr)` → mask cho frame hợp lệ
-
-**🟢 B:**
-- Copy + refactor `model_original.py` → `models/vit_original.py`
-  - Sửa import paths
-  - Thêm docstring cho class/function chính
-
-**🟡 C:**
-- Kiểm tra thực tế file `.npy` ground truth trong `UIT-ADrone/test/test_frame_mask/`
-- Xem phân phối nhãn: mỗi nhãn chiếm bao nhiêu frame?
-- Báo lại cho A để điều chỉnh logic nếu cần
-
-**✅ Deliverable:** `label_map.py` draft, `models/vit_original.py` xong
-
----
-
-### 🗓️ Ngày 3 — Preprocessing & Model (tiếp)
-
-**🔵 A:**
-- Viết `data/preprocess.py`:
-  - Hàm `convert_label_files(input_dir, output_dir)`
-  - Tạo thư mục output `test_frame_mask_3cls/`
-  - Log thống kê trước/sau chuyển đổi
-
-**🟢 B:**
-- Copy + refactor `model_ste_tte.py` → `models/vit_ste_tte.py`
-- Copy + refactor `model_baseline_ca.py` → `models/vit_baseline_ca.py`
-- Tạo `models/__init__.py` export cả 3 model
-
-**🟡 C:**
-- Viết script nhỏ `notebooks/explore_labels.ipynb` hoặc `.py`:
-  - Đọc file `.npy` → vẽ histogram phân phối nhãn
-  - Kiểm tra nhãn 2, 3, 9 có đủ data không
-  - Ghi kết quả vào `outputs/label_stats.txt`
-
-**✅ Deliverable:** `preprocess.py` draft, `models/` package hoàn chỉnh, thống kê nhãn
-
----
-
-### 🗓️ Ngày 4 — Dataset class & Trainer
-
-**🔵 A:**
-- Viết `data/dataset.py` (từ `data_utils.py` cũ):
-  - Giữ nguyên `DataLoader` class
-  - Thêm parameter `label_map` tùy chọn
-  - Test import từ `data/`
-
-**🟢 B:**
-- Viết `engine/trainer.py`:
-  - Tách `train_epoch()`, `valid_epoch()`, `save_model()` từ các `train_val_*.py`
-  - Nhận `config` và `save_path` làm tham số (không hardcode)
-
-**🟡 C:**
-- Chạy thử `data/preprocess.py` trên dataset thật
-- Kiểm tra file `.npy` output có đúng format không
-- Report bug nếu có
-
-**✅ Deliverable:** `dataset.py` xong, `engine/trainer.py` draft
-
----
-
-### 🗓️ Ngày 5 — Configs & Evaluator
-
-**🔵 A:**
-- Viết `configs/` package:
-  - `configs/model_config.py`: ViT architecture configs (b16, b32, l16...)
-  - `configs/train_config.py`: training hyperparameters
-  - `configs/__init__.py`: export `get_train_config()`, `get_eval_config()`
-
-**🟢 B:**
-- Viết `engine/evaluator.py`:
-  - Tách `test_all_scenes()` ra file riêng
-  - Thêm param `label_map_path` để load nhãn mới
-  - Tính AUC theo từng nhãn (per-class AUC)
-
-**🟡 C:**
-- Kiểm thử `data/label_map.py`:
-  - Tạo array test cases: `[0, 0, 3, 2, 9, 5, 7]`
-  - Xác nhận output đúng: `[0, 0, 1, 2, 3, -1, -1]`
-  - Ghi test case vào `data/test_label_map.py`
-
-**✅ Deliverable:** `configs/` xong, `engine/evaluator.py` draft, label_map được kiểm thử
-
----
-
-### 🗓️ Ngày 6 — Tích hợp pipeline
-
-**🔵 A:**
-- Tích hợp toàn bộ data pipeline:
-  - `configs/` → `data/dataset.py` → `engine/trainer.py` hoạt động cùng nhau
-  - Test import: `from data.dataset import DataLoader` không lỗi
-  - Fix path issues (relative → absolute, Windows/Linux)
-
-**🟢 B:**
-- Bắt đầu viết `scripts/train_STE_TTE.py`:
-  - Import từ `models/`, `engine/`, `configs/`, `data/`
-  - Không còn hardcode paths
-  - Thêm `argparse` cho `--data-dir`, `--output-dir`, `--num-classes=3`
-
-**🟡 C:**
-- Hỗ trợ A debug tích hợp
-- Test thử import toàn bộ module từ root:
-  ```python
-  from configs import get_train_config
-  from data import DataLoader, LABEL_MAP
-  from models import VisionTransformer
-  ```
-- Ghi lại lỗi gặp phải
-
-**✅ Deliverable:** Pipeline import được, `scripts/train_STE_TTE.py` draft
-
----
-
-### 🗓️ Ngày 7 — Scripts & Unit tests
-
-**🔵 A:**
-- Viết unit test cho `data/`:
-  - `test_label_map.py`: kiểm thử remap function
-  - `test_dataset.py`: kiểm thử DataLoader load ảnh
-- Dùng `pytest` hoặc `assert` đơn giản
-
-**🟢 B:**
-- Viết thêm các scripts còn lại:
-  - `scripts/train_UIT_ADrone.py`
-  - `scripts/train_baseline_ca.py`
-- Đảm bảo tất cả script dùng `--num-classes 3`
-
-**🟡 C:**
-- Chuẩn bị lệnh chạy experiment:
-  ```bash
-  python scripts/train_STE_TTE.py \
-    --train 1 \
-    --num-classes 3 \
-    --data-dir ../../UIT-ADrone \
-    --exp-name exp_3cls_v1
-  ```
-- Kiểm tra GPU available, CUDA version
-- Chuẩn bị template ghi kết quả
-
-**✅ Deliverable:** Scripts đầy đủ, unit tests pass, lệnh chạy sẵn sàng
-
----
-
-### 🗓️ Ngày 8 — Dry run & Fix bugs
-
-**🔵 A:**
-- Hỗ trợ fix bug liên quan đến data pipeline khi chạy thật
-- Đảm bảo `outputs/` structure tự tạo đúng:
-  ```
-  outputs/exp_3cls_v1/
-  ├── checkpoints/
-  ├── logs/
-  └── predictions/
-  ```
-
-**🟢 B:**
-- Chạy **dry run** (1-2 epoch) với model STE-TTE + 3 nhãn
-- Ghi log: loss có giảm không, không crash
-- Fix import errors nếu còn sót
-
-**🟡 C:**
-- Theo dõi log training, ghi lại:
-  - Reconstruction loss theo epoch
-  - Có warning/error không
-- Bắt đầu viết bảng so sánh kết quả
-
-**✅ Deliverable:** Training chạy được 2 epoch không crash
-
----
-
-### 🗓️ Ngày 9 — Evaluation & Kết quả
-
-**🔵 A:**
-- Viết `requirements.txt`:
-  ```
-  torch>=1.10
-  torchvision
-  numpy
-  opencv-python
-  scikit-learn
-  tqdm
-  tensorboard
-  ```
-- Kiểm tra môi trường fresh install có hoạt động không
-
-**🟢 B:**
-- Chạy evaluation `test_all_scenes` với nhãn 3 class
-- Tính AUC tổng và per-class AUC cho 3 nhãn
-- Lưu kết quả vào `outputs/exp_3cls_v1/results.json`
-
-**🟡 C:**
-- Phân tích kết quả:
-  - AUC của từng nhãn cao/thấp như thế nào?
-  - So sánh với baseline (nếu có)
-  - Vẽ ROC curve cho 3 nhãn
-
-**✅ Deliverable:** Kết quả AUC 3 nhãn, `requirements.txt`, ROC curve
-
----
-
-### 🗓️ Ngày 10 — Hoàn thiện & Tổng kết
-
-**🔵 A:**
-- Code review toàn bộ `data/`, `configs/`
-- Xoá các file cũ không còn dùng (hoặc move vào `archive/`)
-- Đảm bảo không còn hardcode path
-
-**🟢 B:**
-- Fix bugs cuối cùng
-- Dọn dẹp `engine/`, `scripts/`, `models/`
-- Đảm bảo mọi script có `--help` hoạt động
-
-**🟡 C:**
-- Viết lại `README.md`:
-  - Mô tả 3 nhãn mới
-  - Hướng dẫn cài đặt
-  - Hướng dẫn train & eval
-  - Kết quả thực nghiệm
-
-**✅ Deliverable cuối:** Project hoàn chỉnh, README đầy đủ, kết quả có thể reproduce
-
----
-
-## Phụ thuộc giữa các task (Critical Path)
-
-```
-Ngày 1 (A: cấu trúc) ──→ Ngày 2 (A: label_map) ──→ Ngày 3 (A: preprocess)
-                                                              ↓
-Ngày 1 (B: nghiên cứu) ──→ Ngày 2-3 (B: models/) ──→ Ngày 4 (B: trainer)
-                                                              ↓
-                                            Ngày 6 (A+B: Tích hợp) ──→ Ngày 8 (B: dry run) ──→ Ngày 9 (B: eval)
-```
-
----
-
-> [!NOTE]
-> Lịch này giả sử dataset UIT-ADrone đã có sẵn. Nếu chưa có, Ngày 1-2 cần thêm bước download/setup dataset.
-</file>
-
-<file path="data/dataset.py">
-import numpy as np
-import os
-import glob
-import cv2
-import torch.utils.data as data
-
-def np_load_frame(filename, resize_height, resize_width):
-    """
-    Load image path and convert it to numpy.ndarray.
-    """
-    image_decoded = cv2.imread(filename)
-    h, w, _ = image_decoded.shape
-    image_resized = cv2.resize(image_decoded, (resize_width, resize_height))
-    image_resized = image_resized.astype(dtype=np.float32)
-    image_resized = (image_resized / 127.5) - 1.0
-    return image_resized, h, w
-
-class DataLoader(data.Dataset):
-    """Dataset for loading video frames and returning two resolutions.
-
-    Args:
-        video_folder: Root folder containing frames or subfolders of frames.
-        transform: Callable applied to each frame (expects CHW tensors).
-        resize_height: Target height for standard frames.
-        resize_width: Target width for standard frames.
-        time_step: Number of input frames per sample.
-        num_pred: Number of prediction frames per sample.
-        label_map: Optional label mapping for supervised/label-aware use.
-
-    Returns:
-        dict with keys:
-            "256": np.ndarray, shape (time_step + num_pred, 3, 256, 256)
-            "standard": np.ndarray, shape (time_step + num_pred, 3, resize_height, resize_width)
-    """
-    def __init__(self, video_folder, transform, resize_height, resize_width, time_step=4, num_pred=1, label_map=None):
-        self.dir = video_folder
-        self.transform = transform
-        self.video_frames = []
-        self._resize_height = resize_height
-        self._resize_width = resize_width
-        self._time_step = time_step
-        self._num_pred = num_pred
-        self.index_samples = []
-        
-        # Gán tham số label_map
-        self.label_map = label_map
-        
-        self.setup()
-
-    def setup(self):
-        videos = glob.glob(os.path.join(self.dir, '*'))
-        videos.sort()
-        if os.path.isdir(videos[0]):
-            all_video_frames = []
-            for video in videos:
-                vide_frames = glob.glob(os.path.join(video, '*.jpg'))
-                vide_frames.sort(key=lambda x: int(os.path.basename(x).split('.')[0].split('_')[-1]))
-                if len(all_video_frames) == 0:
-                    all_video_frames = vide_frames
-                else:
-                    all_video_frames += vide_frames
-        else:
-            videos.sort(key=lambda x: int(os.path.basename(x).split('.')[0].split('_')[-1]))
-            all_video_frames = videos
-        
-        self.video_frames = all_video_frames
-        self.index_samples = list(range(len(all_video_frames)-self._time_step))
-
-    def __getitem__(self, index):
-        frame_index = self.index_samples[index]
-        batch_frames_512 = np.zeros((self._time_step+self._num_pred, 3, 256, 256))
-        batch_frames = np.zeros((self._time_step+self._num_pred, 3, self._resize_height, self._resize_width))
-
-        for i in range(self._time_step + self._num_pred):
-            image_512, h, w = np_load_frame(self.video_frames[frame_index + i], 256, 256)
-            image, h, w = np_load_frame(self.video_frames[frame_index + i], self._resize_height,
-                                  self._resize_width)
-
-            if self.transform is not None:
-                batch_frames_512[i] = self.transform(image_512)
-                batch_frames[i] = self.transform(image)
-            
-        return {
-            '256': batch_frames_512,
-            'standard': batch_frames
-        }
-
-    def __len__(self):
-        return len(self.index_samples)
-</file>
-
-<file path="engine/trainer.py">
-import os
-import torch
-import torch.nn as nn
-import numpy as np
-# from models.vit_ste_tte import VisionTransformer
-# from model_efficientnet import VisionTransformer
-import torchvision.transforms as transforms
-# from configs.train_config import get_train_config
-# from checkpoint import load_checkpoint
-# from data_loaders import *
-from models.utils import setup_device, accuracy, MetricTracker, TensorboardWriter
-
-# Anomaly score: higher MSE = more anomalous
-loss_func_mse = nn.MSELoss(reduction='mean')
-# from data_utils import DataLoader
-from sklearn.metrics import *
-import torch.utils.data as data
-import pdb
-import glob
-from torch.autograd import Variable
-import argparse
-# import neptune
-
-def train_epoch(epoch, model, data_loader, criterion, optimizer, lr_scheduler, metrics, device=torch.device('cpu')):
-    metrics.reset()
-    average_loss = []
-    # training loop
-    for batch_idx, (batch_data) in enumerate(data_loader):
-        batch_data_256, batch_data = batch_data['256'].to(device), batch_data['standard'].to(device)
-        optimizer.zero_grad()
-        batch_pred = model(batch_data[:,:4])
-        loss = loss_func_mse(batch_data_256[:,4].float(), batch_pred)
-        loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
-        metrics.writer.set_step((epoch - 1) * len(data_loader) + batch_idx)
-        metrics.update('loss', loss.item())
-        average_loss.append(loss.item())
-
-        if batch_idx % 100 == 0:
-            print("Train Epoch: {:03d} Batch: {:05d}/{:05d} Reconstruction Loss: {:.4f}"
-                    .format(epoch, batch_idx, len(data_loader), np.mean(average_loss)))
-    return metrics.result()
-
-def valid_epoch(epoch, model, data_loader, criterion, metrics, config, device=torch.device('cpu')):
-    """
-    Validate using MSE as anomaly score.
-    Higher MSE → more anomalous → higher AUC-ROC = better model.
-    """
-    metrics.reset()
-    losses = []
-    label_path = os.path.join(config.data_dir, 'test/test_frame_mask/DJI_0073.npy')
-    new_label = np.load(label_path)
-
-    with torch.no_grad():
-        for batch_idx, (batch_data) in enumerate(data_loader):
-            batch_data_256, batch_data = batch_data['256'].to(device), batch_data['standard'].to(device)
-            batch_pred = model(batch_data[:, :4])
-            loss = loss_func_mse(batch_data_256[:, 4].float(), batch_pred)
-            losses.append(loss.item())
-
-    mean_loss = np.mean(losses)
-    frame_auc = roc_auc_score(y_true=new_label[:len(losses)], y_score=losses)
-    metrics.writer.set_step(epoch, 'valid')
-    metrics.update('loss', mean_loss)
-    metrics.update('auc', frame_auc)
-    print("Val Epoch {:03d} | Loss: {:.4f} | AUC: {:.4f}".format(epoch, mean_loss, frame_auc))
-    return metrics.result()
-
-from tqdm import tqdm
-save_path = 'experiments_andt_ADrone_STE_TTE/'
-if not os.path.exists(save_path):
-    os.mkdir(save_path)
-
-def save_model(save_dir, epoch, model, optimizer, lr_scheduler, device_ids, best=False):
-    state = {
-        'epoch': epoch,
-        'state_dict': model.state_dict() if len(device_ids) <= 1 else model.module.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'lr_scheduler': lr_scheduler.state_dict(),
-    }
-    filename = str('./' + save_path + 'checkpoints/' + 'current.pth')
-    torch.save(state, filename)
-
-    if best:
-        filename = str('./' + save_path + 'checkpoints/' + 'best.pth')
-        torch.save(state, filename)
-</file>
-
-<file path="configs/__init__.py">
-import os
-from .train_config import get_train_config, get_eval_config
-from . import model_config
-
-def print_config(config):
-    message = '\n' + '='*20 + ' CONFIGURATION ' + '='*20 + '\n'
-    for k, v in sorted(vars(config).items()):
-        message += f'{k:>25}: {v:<30}\n'
-    message += '='*55 + '\n'
-    print(message)
-
-def setup_output_dirs(exp_name):
-    """Tự động tạo cấu trúc thư mục lưu trữ cho experiment"""
-    base_dir = os.path.join("outputs", exp_name)
-    dirs_to_make = [
-        os.path.join(base_dir, "checkpoints"),
-        os.path.join(base_dir, "logs"),
-        os.path.join(base_dir, "predictions")
-    ]
-    for d in dirs_to_make:
-        os.makedirs(d, exist_ok=True)
-    print(f"[*] Đã tự động khởi tạo cấu trúc thư mục tại: {base_dir}")
-
-def get_train_config():
-    config = get_train_args()
-    config = getattr(model_config, f"get_{config.model_arch}_config")(config)
-    
-    # Gọi hàm tự động tạo thư mục output dựa theo tên experiment
-    setup_output_dirs(config.exp_name)
-    
-    print_config(config)
-    return config
-
-def get_eval_config():
-    config = get_eval_args()
-    config = getattr(model_config, f"get_{config.model_arch}_config")(config)
-    print_config(config)
-    return config
-</file>
-
 <file path="configs/train_config.py">
 import argparse
 from models.utils import process_config
@@ -2958,6 +3380,8 @@ def get_train_config():
     # Checkpoint
     parser.add_argument("--checkpoint-path", type=str,
                         default="./experiments_andt_ADrone_STE_TTE/checkpoints/best.pth")
+    parser.add_argument("--save-dir", type=str, default=None,
+                        help="Thư mục gốc lưu checkpoint/result. Mặc định dùng ./experiments/")
 
     # Anomaly detection specific
     parser.add_argument("--anomaly-threshold", type=float, default=None,
@@ -2985,6 +3409,163 @@ def get_eval_config():
     config, _ = parser.parse_known_args()
     config = _apply_arch(config)
     return config
+</file>
+
+<file path="engine/trainer.py">
+# === FILE: engine/trainer.py ===
+import os
+import torch
+import torch.nn as nn
+import numpy as np
+# from models.vit_ste_tte import VisionTransformer
+# from model_efficientnet import VisionTransformer
+import torchvision.transforms as transforms
+# from configs.train_config import get_train_config
+# from checkpoint import load_checkpoint
+# from data_loaders import *
+from models.utils import setup_device, accuracy, MetricTracker, TensorboardWriter
+
+# Anomaly score: higher MSE = more anomalous
+loss_func_mse = nn.MSELoss(reduction='mean')
+# from data_utils import DataLoader
+from sklearn.metrics import *
+import torch.utils.data as data
+import pdb
+import glob
+from torch.autograd import Variable
+import argparse
+# import neptune
+
+
+def save_resume_checkpoint(state, filepath):
+    """Lưu checkpoint resume giữa epoch."""
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    torch.save(state, filepath)
+
+
+def train_epoch(epoch, model, data_loader, criterion, optimizer, lr_scheduler, metrics, config, device=torch.device('cpu'), start_batch=0):
+    """Train 1 epoch, hỗ trợ resume từ batch chỉ định."""
+    metrics.reset()
+    average_loss = []
+    # Vòng lặp training
+    for batch_idx, (batch_data) in enumerate(data_loader):
+        # Bỏ qua các batch đã train khi resume
+        if batch_idx <= start_batch and start_batch > 0:
+            continue
+
+        batch_data_256, batch_data = batch_data['256'].to(device), batch_data['standard'].to(device)
+        optimizer.zero_grad()
+        batch_pred = model(batch_data[:,:4])
+        loss = loss_func_mse(batch_data_256[:,4].float(), batch_pred)
+        loss.backward()
+        optimizer.step()
+        lr_scheduler.step()
+        metrics.writer.set_step((epoch - 1) * len(data_loader) + batch_idx)
+        metrics.update('loss', loss.item())
+        average_loss.append(loss.item())
+
+        if batch_idx % 100 == 0:
+            print("Train Epoch: {:03d} Batch: {:05d}/{:05d} Reconstruction Loss: {:.4f}"
+                    .format(epoch, batch_idx, len(data_loader), np.mean(average_loss)))
+
+        # Lưu checkpoint giữa epoch mỗi 500 batch
+        if batch_idx % 500 == 0 and batch_idx > 0:
+            save_resume_checkpoint({
+                'epoch': epoch,
+                'batch': batch_idx,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': lr_scheduler.state_dict(),
+            }, filepath=os.path.join(config.checkpoint_dir, 'resume.pth'))
+
+    return metrics.result()
+
+def valid_epoch(epoch, model, data_loader, criterion, metrics, config, device=torch.device('cpu')):
+    """
+    Validate using MSE as anomaly score.
+    Higher MSE → more anomalous → higher AUC-ROC = better model.
+    """
+    metrics.reset()
+    losses = []
+    label_path = os.path.join(config.data_dir, 'test/test_frame_mask/DJI_0073.npy')
+    new_label = np.load(label_path)
+
+    with torch.no_grad():
+        for batch_idx, (batch_data) in enumerate(data_loader):
+            batch_data_256, batch_data = batch_data['256'].to(device), batch_data['standard'].to(device)
+            batch_pred = model(batch_data[:, :4])
+            loss = loss_func_mse(batch_data_256[:, 4].float(), batch_pred)
+            losses.append(loss.item())
+
+    mean_loss = np.mean(losses)
+    frame_auc = roc_auc_score(y_true=new_label[:len(losses)], y_score=losses)
+    metrics.writer.set_step(epoch, 'valid')
+    metrics.update('loss', mean_loss)
+    metrics.update('auc', frame_auc)
+    print("Val Epoch {:03d} | Loss: {:.4f} | AUC: {:.4f}".format(epoch, mean_loss, frame_auc))
+    return metrics.result()
+
+from tqdm import tqdm
+save_path = 'experiments_andt_ADrone_STE_TTE/'
+if not os.path.exists(save_path):
+    os.mkdir(save_path)
+
+def save_model(save_dir, epoch, model, optimizer, lr_scheduler, device_ids, best=False):
+    state = {
+        'epoch': epoch,
+        'state_dict': model.state_dict() if len(device_ids) <= 1 else model.module.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'lr_scheduler': lr_scheduler.state_dict(),
+    }
+    filename = str('./' + save_path + 'checkpoints/' + 'current.pth')
+    torch.save(state, filename)
+
+    if best:
+        filename = str('./' + save_path + 'checkpoints/' + 'best.pth')
+        torch.save(state, filename)
+
+
+def train(model, train_loader, valid_loader, criterion, optimizer, lr_scheduler, train_metrics, valid_metrics, config, device, device_ids):
+    """Vòng lặp training chính, hỗ trợ resume từ checkpoint."""
+    # Kiểm tra resume checkpoint
+    resume_path = os.path.join(config.checkpoint_dir, 'resume.pth')
+    start_epoch = 1
+    start_batch = 0
+    if os.path.exists(resume_path):
+        ckpt = torch.load(resume_path, map_location=device)
+        model.load_state_dict(ckpt['state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer'])
+        lr_scheduler.load_state_dict(ckpt['scheduler'])
+        start_epoch = ckpt['epoch']
+        start_batch = ckpt['batch']
+        print(f'Resume từ epoch {start_epoch}, batch {start_batch}')
+
+    best_auc = 0.0
+    for epoch in range(1, config.epochs + 1):
+        # Bỏ qua các epoch đã train xong
+        if epoch < start_epoch:
+            continue
+
+        model.train()
+        # Chỉ truyền start_batch cho epoch đang resume, các epoch sau bắt đầu từ 0
+        current_start_batch = start_batch if epoch == start_epoch else 0
+        result = train_epoch(epoch, model, train_loader, criterion, optimizer, lr_scheduler,
+                             train_metrics, config, device, start_batch=current_start_batch)
+
+        model.eval()
+        val_result = valid_epoch(epoch, model, valid_loader, criterion, valid_metrics, config, device)
+
+        # Lưu checkpoint cuối epoch
+        best = val_result.get('auc', 0) > best_auc
+        if best:
+            best_auc = val_result.get('auc', 0)
+        save_model(config.checkpoint_dir, epoch, model, optimizer, lr_scheduler, device_ids, best)
+
+        # Xóa resume checkpoint sau khi hoàn thành epoch
+        if os.path.exists(resume_path):
+            os.remove(resume_path)
+
+    print(f'Training hoàn tất. Best AUC: {best_auc:.4f}')
 </file>
 
 <file path="requirements.txt">
@@ -3082,7 +3663,7 @@ def train_epoch(
                 .format(
                     epoch,
                     batch_idx,
-                    global_batch_offset + len(data_loader),
+                    len(data_loader),
                     np.mean(average_loss)
                 )
             )
@@ -3129,7 +3710,10 @@ def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
             losses.append(loss.item())
 
     mean_loss = np.mean(losses)
-    frame_auc = roc_auc_score(y_true=new_label[:len(losses)], y_score=losses)
+    frame_auc = roc_auc_score(
+        y_true=list_np_labels,
+        y_score=[-x for x in losses]
+    )
 
     metrics.writer.set_step(epoch, 'valid')
     metrics.update('loss', mean_loss)
@@ -3144,7 +3728,7 @@ def test_all_scenes(model, test_path, config, device=None):
     Load best checkpoint và chạy inference trên toàn bộ test scenes.
     Saves .npy anomaly score files vào SAVE_PATH để dùng với compute_auc.py.
     """
-    path_ckpt = os.path.join(SAVE_PATH, 'checkpoints/best.pth')
+    path_ckpt = config.checkpoint_path
     checkpoint = torch.load(path_ckpt)
     print('Path checkpoint:', path_ckpt)
     model.load_state_dict(checkpoint['state_dict'])
@@ -3180,6 +3764,8 @@ def test_all_scenes(model, test_path, config, device=None):
         list_np_labels.append(np_label[len(np_label) - len(losses_curr_video):])
         np.save(os.path.join(SAVE_PATH, scene_name + '.npy'), np.array(losses_curr_video))
 
+        if idx_video >= 1: break
+
     list_np_labels = np.concatenate(list_np_labels)
 
     # Thresholding + binary prediction
@@ -3188,7 +3774,10 @@ def test_all_scenes(model, test_path, config, device=None):
     print(f"\nThreshold: {threshold:.4f}")
     print(f"Detected anomalies: {binary_pred.sum()} / {len(binary_pred)} frames")
 
-    frame_auc = roc_auc_score(y_true=list_np_labels, y_score=losses)
+    frame_auc = roc_auc_score(
+        y_true=list_np_labels,
+        y_score=[-x for x in losses]
+    )
     print("Final AUC-ROC: {:.4f} | Mean Loss: {:.4f}".format(frame_auc, np.mean(losses)))
     return frame_auc
 
@@ -3205,7 +3794,6 @@ def save_model(save_dir, epoch, model, optimizer, lr_scheduler, device_ids, best
     if best:
         torch.save(state, os.path.join(save_dir, 'best.pth'))
         print(f"  → Best model saved (AUC improved)")
-
 
 def main():
     config = get_train_config()
@@ -3303,8 +3891,8 @@ def main():
             if 'optimizer' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer'])
         
-            if 'lr_scheduler' in checkpoint:
-                lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            # if 'lr_scheduler' in checkpoint:
+            #     lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         
             print("✅ Optimizer + Scheduler resumed")
 
