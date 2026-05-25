@@ -350,22 +350,61 @@ class VisionTransformer(nn.Module):
         self.center = torch.nn.Parameter(torch.randn(emb_dim))
         # self.cross_att = CrossAttention(768, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.)
 
-    def forward(self, x): # x: (b, n, c, h, w)
-        x = x.float().cuda()
+    def forward(self, x):
+        """
+        Forward pass của STE-TTE VisionTransformer (Spatial-Temporal Encoder + Decoder).
+
+        Kiến trúc:
+          1. Spatial Transformer (STE): Với mỗi frame trong chuỗi, trích xuất
+             CLS token đại diện cho đặc trưng không gian của frame đó.
+          2. Temporal Transformer (TTE): Nhận chuỗi CLS token theo thời gian,
+             thêm một learnable CLS token đầu chuỗi, rồi encode toàn bộ
+             chuỗi để nắm bắt quan hệ thời gian.
+          3. Decoder: Từ CLS token đầu ra của TTE, reconstruct lại ảnh.
+             Dùng để tính MSE reconstruction loss cho unsupervised anomaly detection.
+
+        Args:
+            x (Tensor): Input video clip, shape (B, N, C, H, W)
+                        B = batch size, N = số frames, C = số kênh màu (3),
+                        H = chiều cao ảnh, W = chiều rộng ảnh.
+
+        Returns:
+            output (Tensor): Ảnh được reconstruct, shape (B, 3, 256, 256).
+                             Dùng để tính MSE loss với ảnh gốc.
+        """
+        # Fix: dùng .to(device) thay vì hardcode .cuda()
+        # để tương thích với cả CPU, multi-GPU và các device khác
+        device = next(self.parameters()).device
+        x = x.float().to(device)
+
+        # Spatial Transformer Encoder (STE):
+        # Với mỗi frame i, trích xuất CLS token spatial rồi ghép lại thành chuỗi
         for i in range(x.shape[1]):
-            spatial_cls_token = self.spatial_transformer(x[:, i]).unsqueeze(1)
+            spatial_cls_token = self.spatial_transformer(x[:, i]).unsqueeze(1)  # (B, 1, emb_dim)
             if i == 0:
                 all_spatial_cls_token = spatial_cls_token
             else:
-                all_spatial_cls_token = torch.cat((spatial_cls_token, all_spatial_cls_token), 1)
+                all_spatial_cls_token = torch.cat((spatial_cls_token, all_spatial_cls_token), 1)  # (B, N, emb_dim)
 
         b, n, c = all_spatial_cls_token.shape
-        # prepend class token
-        cls_token = self.cls_token.repeat(b, 1, 1)
-        emb = torch.cat([cls_token, all_spatial_cls_token], dim=1)
-        emb = self.temporal_transformer(emb)
-        emb = emb[:,0,:].unsqueeze(1)
-        output = self.decoder(emb)
+
+        # Temporal Transformer Encoder (TTE):
+        # Prepend learnable CLS token vào đầu chuỗi spatial tokens
+        cls_token = self.cls_token.repeat(b, 1, 1)  # (B, 1, emb_dim)
+        emb = torch.cat([cls_token, all_spatial_cls_token], dim=1)  # (B, N+1, emb_dim)
+        emb = self.temporal_transformer(emb)  # (B, N+1, emb_dim)
+
+        # Lấy CLS token ở vị trí 0 làm đại diện toàn bộ clip
+        emb = emb[:, 0, :].unsqueeze(1)  # (B, 1, emb_dim)
+
+        # Decoder: reconstruct ảnh từ embedding
+        output = self.decoder(emb)  # (B, 3, 256, 256)
+
+        # Kiểm tra output shape: phải là (B, 3, 256, 256)
+        assert output.shape[1:] == (3, 256, 256), (
+            f"Decoder output shape sai: expected (B, 3, 256, 256), got {tuple(output.shape)}"
+        )
+
         return output
 
 if __name__ == '__main__':

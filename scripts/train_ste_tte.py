@@ -132,7 +132,10 @@ def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
             losses.append(loss.item())
 
     mean_loss = np.mean(losses)
-    frame_auc = roc_auc_score(y_true=new_label[:len(losses)], y_score=losses)
+    frame_auc = roc_auc_score(
+        y_true=list_np_labels,
+        y_score=[-x for x in losses]
+    )
 
     metrics.writer.set_step(epoch, 'valid')
     metrics.update('loss', mean_loss)
@@ -147,7 +150,7 @@ def test_all_scenes(model, test_path, config, device=None):
     Load best checkpoint và chạy inference trên toàn bộ test scenes.
     Saves .npy anomaly score files vào SAVE_PATH để dùng với compute_auc.py.
     """
-    path_ckpt = os.path.join(SAVE_PATH, 'checkpoints/best.pth')
+    path_ckpt = config.checkpoint_path
     checkpoint = torch.load(path_ckpt)
     print('Path checkpoint:', path_ckpt)
     model.load_state_dict(checkpoint['state_dict'])
@@ -183,6 +186,8 @@ def test_all_scenes(model, test_path, config, device=None):
         list_np_labels.append(np_label[len(np_label) - len(losses_curr_video):])
         np.save(os.path.join(SAVE_PATH, scene_name + '.npy'), np.array(losses_curr_video))
 
+        if idx_video >= 1: break
+
     list_np_labels = np.concatenate(list_np_labels)
 
     # Thresholding + binary prediction
@@ -191,7 +196,10 @@ def test_all_scenes(model, test_path, config, device=None):
     print(f"\nThreshold: {threshold:.4f}")
     print(f"Detected anomalies: {binary_pred.sum()} / {len(binary_pred)} frames")
 
-    frame_auc = roc_auc_score(y_true=list_np_labels, y_score=losses)
+    frame_auc = roc_auc_score(
+        y_true=list_np_labels,
+        y_score=[-x for x in losses]
+    )
     print("Final AUC-ROC: {:.4f} | Mean Loss: {:.4f}".format(frame_auc, np.mean(losses)))
     return frame_auc
 
@@ -208,7 +216,6 @@ def save_model(save_dir, epoch, model, optimizer, lr_scheduler, device_ids, best
     if best:
         torch.save(state, os.path.join(save_dir, 'best.pth'))
         print(f"  → Best model saved (AUC improved)")
-
 
 def main():
     config = get_train_config()
@@ -306,8 +313,8 @@ def main():
             if 'optimizer' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer'])
         
-            if 'lr_scheduler' in checkpoint:
-                lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            # if 'lr_scheduler' in checkpoint:
+            #     lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         
             print("✅ Optimizer + Scheduler resumed")
 
