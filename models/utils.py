@@ -69,14 +69,15 @@ def process_config(config):
     exp_name += ('_' + timestamp)
 
     # create some important directories to be used for that experiments
-    config.summary_dir = os.path.join('experiments', 'tb', exp_name)
-    config.checkpoint_dir = os.path.join('experiments', 'save', exp_name, 'checkpoints/')
-    config.result_dir = os.path.join('experiments', 'save', exp_name, 'results/')
+    base_dir = config.save_dir if getattr(config, 'save_dir', None) else 'experiments'
+    config.summary_dir = os.path.join(base_dir, 'tb', exp_name)
+    config.checkpoint_dir = os.path.join(base_dir, 'save', exp_name, 'checkpoints/')
+    config.result_dir = os.path.join(base_dir, 'save', exp_name, 'results/')
     for dir in [config.summary_dir, config.checkpoint_dir, config.result_dir]:
         ensure_dir(dir)
 
     # save config
-    write_json(vars(config), os.path.join('experiments', 'save', exp_name, 'config.json'))
+    write_json(vars(config), os.path.join(base_dir, 'save', exp_name, 'config.json'))
 
     return config
 

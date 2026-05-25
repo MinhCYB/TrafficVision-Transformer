@@ -26,7 +26,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Anomaly score: higher MSE = more anomalous
 loss_func_mse = nn.MSELoss(reduction='mean')
-SAVE_PATH = '/content/drive/MyDrive/TrafficVision/experiments_andt_ADrone_baseline_CA/'
+SAVE_PATH = os.environ.get('SAVE_PATH', 'experiments_andt_ADrone_baseline_CA/')
 
 
 def normalize_scores(scores):
