@@ -47,7 +47,8 @@ def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, ckp
         loss = loss_func_mse(batch_data_256[:, 4].float(), batch_pred)
         loss.backward()
         optimizer.step()
-        lr_scheduler.step()
+        if lr_scheduler.last_epoch < config.train_steps:
+            lr_scheduler.step()
         metrics.writer.set_step((epoch - 1) * len(data_loader) + batch_idx)
         metrics.update('loss', loss.item())
         average_loss.append(loss.item())

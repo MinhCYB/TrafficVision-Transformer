@@ -3391,6 +3391,7 @@ Usage:
 """
 
 import os
+from itertools import islice
 import torch
 import torch.nn as nn
 import numpy as np
@@ -3420,10 +3421,8 @@ def normalize_scores(scores):
 def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, ckpt_dir, current_start_batch=0, device=torch.device('cpu')):
     metrics.reset()
     average_loss = []
-    for batch_idx, batch_data in enumerate(data_loader):
-        # Bỏ qua batch đã chạy khi resume
-        if batch_idx <= current_start_batch and current_start_batch > 0:
-            continue
+    start = current_start_batch if current_start_batch > 0 else 0
+    for batch_idx, batch_data in enumerate(islice(data_loader, start, None), start=start):
         batch_data_256 = batch_data['256'].to(device)
         batch_data_std = batch_data['standard'].to(device)
         optimizer.zero_grad()
