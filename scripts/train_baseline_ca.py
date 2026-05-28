@@ -35,7 +35,7 @@ def normalize_scores(scores):
     return (scores - scores.min()) / (scores.max() - scores.min() + 1e-8)
 
 
-def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, ckpt_dir, current_start_batch=0, device=torch.device('cpu')):
+def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, ckpt_dir, current_start_batch=0, device=torch.device('cpu'), config=None):
     metrics.reset()
     average_loss = []
     start = current_start_batch if current_start_batch > 0 else 0
@@ -200,7 +200,7 @@ def main():
             log['epoch'] = epoch
             model.train()
             result = train_epoch(epoch, model, train_batch, optimizer, lr_scheduler,
-                                 train_metrics, ckpt_dir, current_start_batch, device)
+                                 train_metrics, ckpt_dir, current_start_batch, device, config)
             log.update(result)
             model.eval()
             result = valid_epoch(epoch, model, test_batch, valid_metrics, config, device)
