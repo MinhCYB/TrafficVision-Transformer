@@ -40,6 +40,8 @@ def train_epoch(epoch, model, data_loader, optimizer, lr_scheduler, metrics, ckp
     average_loss = []
     start = current_start_batch if current_start_batch > 0 else 0
     for batch_idx, batch_data in enumerate(islice(data_loader, start, None), start=start):
+        if batch_idx >= config.train_steps:
+            break
         batch_data_256 = batch_data['256'].to(device)
         batch_data_std = batch_data['standard'].to(device)
         optimizer.zero_grad()
@@ -91,7 +93,7 @@ def valid_epoch(epoch, model, data_loader, metrics, config, device=torch.device(
 
 
 def test_all_scenes(model, test_path, config, device=None):
-    path_ckpt = os.path.join(SAVE_PATH, 'checkpoints/best.pth')
+    path_ckpt = os.path.join(config.checkpoint_dir, 'best.pth')
     checkpoint = torch.load(path_ckpt)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
