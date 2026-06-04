@@ -76,6 +76,7 @@ def valid_epoch(epoch, model, data_loader, metrics, config, device=torch.device(
     losses = []
     label_path = os.path.join(config.data_dir, 'test/test_frame_mask/DJI_0073.npy')
     new_label = np.load(label_path)
+    new_label = (new_label > 0).astype(int)
     with torch.no_grad():
         for batch_data in data_loader:
             batch_data_256 = batch_data['256'].to(device)
@@ -107,6 +108,7 @@ def test_all_scenes(model, test_path, config, device=None):
                                   resize_height=config.image_size, resize_width=config.image_size)
         test_batch = data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=4, drop_last=True)
         np_label = np.load(os.path.join(path_labels, scene_name + '.npy'), allow_pickle=True)
+        np_label = (np_label > 0).astype(int)
         with torch.no_grad():
             for batch_data in tqdm(test_batch, desc=f'Evaluating {scene_name}'):
                 batch_data_256 = batch_data['256'].to(device)

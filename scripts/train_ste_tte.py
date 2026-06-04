@@ -112,7 +112,7 @@ def train_epoch(
     return metrics.result()
 
 
-def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
+def valid_epoch(epoch, model, data_loader, metrics, config, device=torch.device('cpu')):
     """
     Validate using MSE reconstruction loss as anomaly score.
     Higher MSE → frame is more anomalous → used to compute AUC-ROC.
@@ -120,8 +120,9 @@ def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
     metrics.reset()
     losses = []
 
-    val_label_path = '../../UIT-ADrone/test/test_frame_mask/DJI_0073.npy'
+    val_label_path = os.path.join(config.data_dir, 'test/test_frame_mask/DJI_0073.npy')
     new_label = np.load(val_label_path)
+    new_label = (new_label > 0).astype(int)
 
     with torch.no_grad():
         for batch_data in data_loader:
@@ -132,10 +133,7 @@ def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
             losses.append(loss.item())
 
     mean_loss = np.mean(losses)
-    frame_auc = roc_auc_score(
-        y_true=list_np_labels,
-        y_score=[-x for x in losses]
-    )
+    frame_auc = roc_auc_score(y_true=new_label[:len(losses)], y_score=losses)
 
     metrics.writer.set_step(epoch, 'valid')
     metrics.update('loss', mean_loss)
@@ -173,6 +171,7 @@ def test_all_scenes(model, test_path, config, device=None):
         )
         test_batch = data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=4, drop_last=True)
         np_label = np.load(os.path.join(path_labels, scene_name + '.npy'), allow_pickle=True)
+        np_label = (np_label > 0).astype(int)
 
         with torch.no_grad():
             for batch_data in tqdm(test_batch, desc=f'Evaluating {scene_name}'):
@@ -198,7 +197,7 @@ def test_all_scenes(model, test_path, config, device=None):
 
     frame_auc = roc_auc_score(
         y_true=list_np_labels,
-        y_score=[-x for x in losses]
+        y_score=losses
     )
     print("Final AUC-ROC: {:.4f} | Mean Loss: {:.4f}".format(frame_auc, np.mean(losses)))
     return frame_auc
@@ -341,7 +340,7 @@ def main():
             log.update(result)
 
             model.eval()
-            result = valid_epoch(epoch, model, test_batch, valid_metrics, device)
+            result = valid_epoch(epoch, model, test_batch, valid_metrics, config, device)
             log.update(**{'val_' + k: v for k, v in result.items()})
 
             best = False
