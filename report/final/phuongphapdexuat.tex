@@ -2,7 +2,7 @@
 
 \subsection{Tổng quan kiến trúc}
 
-TrafficVision-Transformer được thiết kế như một biến thể nhẹ của hướng Spatio-Temporal Transformer đã được sử dụng trong phát hiện bất thường giao thông từ video trên không \cite{c12}. Đầu vào của mô hình là bốn khung hình liên tiếp $\{X_{t-4},X_{t-3},X_{t-2},X_{t-1}\}$ và đầu ra là khung hình dự đoán $\hat{X}_t$. Sau đó, sai số giữa $\hat{X}_t$ và khung hình thật $X_t$ được dùng làm điểm bất thường.
+TrafficVision-Transformer được thiết kế như một biến thể nhẹ của hướng Spatio-Temporal Transformer đã được sử dụng trong phát hiện bất thường giao thông từ video trên không \cite{c1}. Đầu vào của mô hình là bốn khung hình liên tiếp $\{X_{t-4},X_{t-3},X_{t-2},X_{t-1}\}$ và đầu ra là khung hình dự đoán $\hat{X}_t$. Sau đó, sai số giữa $\hat{X}_t$ và khung hình thật $X_t$ được dùng làm điểm bất thường.
 
 Pipeline gồm bốn khối chính:
 \begin{itemize}
@@ -12,10 +12,14 @@ Pipeline gồm bốn khối chính:
     \item \textbf{Decoder}: tái tạo khung hình tương lai ở độ phân giải $256 \times 256$.
 \end{itemize}
 
-Luồng xử lý tổng quát được mô tả bởi:
-\begin{equation}
-X_{t-4:t-1} \rightarrow STE \rightarrow Z \rightarrow TTE \rightarrow h_t \rightarrow Decoder \rightarrow \hat{X}_t.
-\end{equation}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/pipeline.png}
+\caption{Pipeline tổng quát của TrafficVision-Transformer. Sơ đồ nhấn mạnh điểm điều chỉnh chính của nhóm: Spatial Token Bottleneck giữ một token đại diện cho mỗi frame trước khi đưa vào Temporal Transformer Encoder, giúp giảm chi phí attention trong khi vẫn giữ thông tin chuyển động theo thời gian.}
+\label{fig:pipeline}
+\end{figure*}
+
+Hình \ref{fig:pipeline} minh họa luồng xử lý tổng quát của mô hình. Điểm quan trọng là Temporal Transformer Encoder không nhận toàn bộ patch token của video, mà chỉ nhận một token đại diện cho mỗi frame. Nhờ đó, mô hình vẫn học được quan hệ thời gian nhưng giảm đáng kể chi phí attention.
 
 \subsection{Tiền xử lý chuỗi frame}
 
