@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (MiKTeX 25.3) (preloaded format=pdflatex 2025.6.19)  4 JUN 2026 19:13
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (MiKTeX 25.3) (preloaded format=pdflatex 2025.6.19)  4 JUN 2026 22:08
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -645,9 +645,15 @@ port\final\nghiencuulienquan.tex
 port\final\phuongphapdexuat.tex
 
 [2]
+<figures/pipeline.png, id=133, 1929.2075pt x 821.0675pt>
+File: figures/pipeline.png Graphic file (type png)
+<use figures/pipeline.png>
+Package pdftex.def Info: figures/pipeline.png  used on input line 17.
+(pdftex.def)             Requested size: 505.89pt x 215.30167pt.
 
 
-Underfull \hbox (badness 2237) in paragraph at lines 88--89
+
+Underfull \hbox (badness 2237) in paragraph at lines 92--93
 []\T5/ptm/m/n/10 Khði t¤o Spa-tial Trans-former En-coder, Tem-po-ral
  []
 
@@ -657,13 +663,16 @@ port\final\thucnghiemdanhgia.tex
 
 [3]
 
-)
-(D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVision-Transformer\re
-port\final\ketluan.tex
 
-[4])
+
+[4 <D:/main/Full/documents/uni/Nam 2/Ky 2/seminar/btl/TrafficVision-Transformer
+/report/final/figures/pipeline.png (PNG copy)>])
+(D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVision-Transformer\re
+port\final\ketluan.tex)
 (D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVision-Transformer\re
 port\final\tailieuthamkhao.tex
+
+
 Underfull \hbox (badness 1400) in paragraph at lines 23--24
 \T5/ptm/m/it/8 ser-va-tions and Re-mote Sens-ing\T5/ptm/m/n/8 , vol. 16, pp. 55
 90--5601. DOI:
@@ -677,11 +686,7 @@ Underfull \hbox (badness 5077) in paragraph at lines 23--24
 
 )
 
-
-
-[5
-
-]
+[5]
 (D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVision-Transformer\re
 port\final\phuluc.tex
 Underfull \hbox (badness 3780) in paragraph at lines 52--53
@@ -715,10 +720,10 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: 352D895C9654A9837A50585697A91B83;5254.
  ) 
 Here is how much of TeX's memory you used:
- 11339 strings out of 473523
- 173377 string characters out of 5724697
- 578213 words of memory out of 5000000
- 34327 multiletter control sequences out of 15000+600000
+ 11349 strings out of 473523
+ 173634 string characters out of 5724697
+ 579583 words of memory out of 5000000
+ 34337 multiletter control sequences out of 15000+600000
  688741 words of font info for 143 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,10n,79p,2038b,520s stack positions out of 10000i,1000n,20000p,200000b,200000s
@@ -737,9 +742,9 @@ am Files/MiKTeX/fonts/type1/vntex/urwvn/utmb8v.pfb><C:/Program Files/MiKTeX/fon
 ts/type1/vntex/urwvn/utmbi8v.pfb><C:/Program Files/MiKTeX/fonts/type1/vntex/urw
 vn/utmr8v.pfb><C:/Program Files/MiKTeX/fonts/type1/vntex/urwvn/utmri8v.pfb>
 Output written on "D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVis
-ion-Transformer\report\final\main.pdf" (6 pages, 287759 bytes).
+ion-Transformer\report\final\main.pdf" (6 pages, 1259489 bytes).
 PDF statistics:
- 302 PDF objects out of 1000 (max. 8388607)
+ 304 PDF objects out of 1000 (max. 8388607)
  74 named destinations out of 1000 (max. 500000)
- 217 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 222 words of extra memory for PDF output out of 10000 (max. 10000000)
 

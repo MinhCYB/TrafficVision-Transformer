@@ -12,10 +12,14 @@ Pipeline gồm bốn khối chính:
     \item \textbf{Decoder}: tái tạo khung hình tương lai ở độ phân giải $256 \times 256$.
 \end{itemize}
 
-Luồng xử lý tổng quát được mô tả bởi:
-\begin{equation}
-X_{t-4:t-1} \rightarrow STE \rightarrow Z \rightarrow TTE \rightarrow h_t \rightarrow Decoder \rightarrow \hat{X}_t.
-\end{equation}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/pipeline.png}
+\caption{Pipeline tổng quát của TrafficVision-Transformer. Sơ đồ nhấn mạnh điểm điều chỉnh chính của nhóm: Spatial Token Bottleneck giữ một token đại diện cho mỗi frame trước khi đưa vào Temporal Transformer Encoder, giúp giảm chi phí attention trong khi vẫn giữ thông tin chuyển động theo thời gian.}
+\label{fig:pipeline}
+\end{figure*}
+
+Hình \ref{fig:pipeline} minh họa luồng xử lý tổng quát của mô hình. Điểm quan trọng là Temporal Transformer Encoder không nhận toàn bộ patch token của video, mà chỉ nhận một token đại diện cho mỗi frame. Nhờ đó, mô hình vẫn học được quan hệ thời gian nhưng giảm đáng kể chi phí attention.
 
 \subsection{Tiền xử lý chuỗi frame}
 

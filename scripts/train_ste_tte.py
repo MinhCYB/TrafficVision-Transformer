@@ -112,7 +112,7 @@ def train_epoch(
     return metrics.result()
 
 
-def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
+def valid_epoch(epoch, model, data_loader, metrics, config, device=torch.device('cpu')):
     """
     Validate using MSE reconstruction loss as anomaly score.
     Higher MSE → frame is more anomalous → used to compute AUC-ROC.
@@ -120,7 +120,7 @@ def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
     metrics.reset()
     losses = []
 
-    val_label_path = '../../UIT-ADrone/test/test_frame_mask/DJI_0073.npy'
+    val_label_path = os.path.join(config.data_dir, 'test/test_frame_mask/DJI_0073.npy')
     new_label = np.load(val_label_path)
 
     with torch.no_grad():
@@ -132,9 +132,10 @@ def valid_epoch(epoch, model, data_loader, metrics, device=torch.device('cpu')):
             losses.append(loss.item())
 
     mean_loss = np.mean(losses)
+    frame_labels = new_label[:len(losses)]
     frame_auc = roc_auc_score(
-        y_true=list_np_labels,
-        y_score=[-x for x in losses]
+        y_true=frame_labels,
+        y_score=losses
     )
 
     metrics.writer.set_step(epoch, 'valid')
@@ -186,8 +187,6 @@ def test_all_scenes(model, test_path, config, device=None):
         list_np_labels.append(np_label[len(np_label) - len(losses_curr_video):])
         np.save(os.path.join(SAVE_PATH, scene_name + '.npy'), np.array(losses_curr_video))
 
-        if idx_video >= 1: break
-
     list_np_labels = np.concatenate(list_np_labels)
 
     # Thresholding + binary prediction
@@ -198,7 +197,7 @@ def test_all_scenes(model, test_path, config, device=None):
 
     frame_auc = roc_auc_score(
         y_true=list_np_labels,
-        y_score=[-x for x in losses]
+        y_score=losses
     )
     print("Final AUC-ROC: {:.4f} | Mean Loss: {:.4f}".format(frame_auc, np.mean(losses)))
     return frame_auc
@@ -341,7 +340,7 @@ def main():
             log.update(result)
 
             model.eval()
-            result = valid_epoch(epoch, model, test_batch, valid_metrics, device)
+            result = valid_epoch(epoch, model, test_batch, valid_metrics, config, device)
             log.update(**{'val_' + k: v for k, v in result.items()})
 
             best = False
