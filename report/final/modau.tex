@@ -10,7 +10,7 @@ Transformer là một kiến trúc mạnh cho hiểu video nhờ khả năng mô
 
 \subsection{Định vị đóng góp và tính mới}
 
-Bài báo này không định vị đóng góp theo hướng phát minh lại toàn bộ nguyên lý Spatio-Temporal Transformer. Thay vào đó, nhóm định vị công việc như một nghiên cứu tái hiện có điều chỉnh: kế thừa ý tưởng học không giám sát bằng dự đoán khung hình tương lai, sau đó thiết kế lại pipeline và kiến trúc theo ràng buộc tính toán thực tế của nhóm sinh viên. Tính mới của bài nằm ở cách đặt bài toán và cách điều chỉnh kỹ thuật cho điều kiện tài nguyên thấp, cụ thể là giảm số token thời gian, dùng encoder nông và xây dựng quy trình kiểm chứng end-to-end thay vì chỉ mô tả lý thuyết.
+Bài báo này không định vị đóng góp theo hướng phát minh lại toàn bộ nguyên lý Spatio-Temporal Transformer. Thay vào đó, nhóm định vị công việc như một nghiên cứu tái hiện có điều chỉnh từ hướng Transformer-based Spatio-Temporal Unsupervised Traffic Anomaly Detection in Aerial Videos \cite{c12}, đồng thời sử dụng UIT-ADrone \cite{c11} làm bộ dữ liệu tham chiếu cho bài toán giao thông drone. Nhóm kế thừa ý tưởng học không giám sát bằng dự đoán khung hình tương lai, sau đó thiết kế lại pipeline và kiến trúc theo ràng buộc tính toán thực tế của nhóm sinh viên. Tính mới của bài nằm ở cách đặt bài toán và cách điều chỉnh kỹ thuật cho điều kiện tài nguyên thấp, cụ thể là giảm số token thời gian, dùng encoder nông và xây dựng quy trình kiểm chứng end-to-end thay vì chỉ mô tả lý thuyết.
 
 Đóng góp chính của bài báo gồm:
 \begin{itemize}
