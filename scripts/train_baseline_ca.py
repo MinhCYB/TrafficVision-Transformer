@@ -93,7 +93,7 @@ def valid_epoch(epoch, model, data_loader, metrics, config, device=torch.device(
 
 
 def test_all_scenes(model, test_path, config, device=None):
-    path_ckpt = os.path.join(config.checkpoint_dir, 'best.pth')
+    path_ckpt = config.checkpoint_path
     checkpoint = torch.load(path_ckpt)
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
