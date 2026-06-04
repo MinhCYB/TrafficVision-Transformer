@@ -2,7 +2,7 @@
 
 \subsection{Tổng quan kiến trúc}
 
-TrafficVision-Transformer được thiết kế như một biến thể nhẹ của hướng Spatio-Temporal Transformer đã được sử dụng trong phát hiện bất thường giao thông từ video trên không \cite{c12}. Đầu vào của mô hình là bốn khung hình liên tiếp $\{X_{t-4},X_{t-3},X_{t-2},X_{t-1}\}$ và đầu ra là khung hình dự đoán $\hat{X}_t$. Sau đó, sai số giữa $\hat{X}_t$ và khung hình thật $X_t$ được dùng làm điểm bất thường.
+TrafficVision-Transformer được thiết kế như một biến thể nhẹ của hướng Spatio-Temporal Transformer đã được sử dụng trong phát hiện bất thường giao thông từ video trên không \cite{c1}. Đầu vào của mô hình là bốn khung hình liên tiếp $\{X_{t-4},X_{t-3},X_{t-2},X_{t-1}\}$ và đầu ra là khung hình dự đoán $\hat{X}_t$. Sau đó, sai số giữa $\hat{X}_t$ và khung hình thật $X_t$ được dùng làm điểm bất thường.
 
 Pipeline gồm bốn khối chính:
 \begin{itemize}

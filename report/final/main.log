@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (MiKTeX 25.3) (preloaded format=pdflatex 2025.6.19)  4 JUN 2026 22:08
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (MiKTeX 25.3) (preloaded format=pdflatex 2025.6.19)  4 JUN 2026 22:25
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -673,13 +673,13 @@ port\final\ketluan.tex)
 port\final\tailieuthamkhao.tex
 
 
-Underfull \hbox (badness 1400) in paragraph at lines 23--24
+Underfull \hbox (badness 1400) in paragraph at lines 5--6
 \T5/ptm/m/it/8 ser-va-tions and Re-mote Sens-ing\T5/ptm/m/n/8 , vol. 16, pp. 55
 90--5601. DOI:
  []
 
 
-Underfull \hbox (badness 5077) in paragraph at lines 23--24
+Underfull \hbox (badness 5077) in paragraph at lines 5--6
 \T5/ptm/m/n/8 10.1109/JS-TARS.2023.3285905. [On-line]. Avail-able: [][]$\T5/pcr
 /m/n/8 https : / /
  []
@@ -742,7 +742,7 @@ am Files/MiKTeX/fonts/type1/vntex/urwvn/utmb8v.pfb><C:/Program Files/MiKTeX/fon
 ts/type1/vntex/urwvn/utmbi8v.pfb><C:/Program Files/MiKTeX/fonts/type1/vntex/urw
 vn/utmr8v.pfb><C:/Program Files/MiKTeX/fonts/type1/vntex/urwvn/utmri8v.pfb>
 Output written on "D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVis
-ion-Transformer\report\final\main.pdf" (6 pages, 1259489 bytes).
+ion-Transformer\report\final\main.pdf" (6 pages, 1259476 bytes).
 PDF statistics:
  304 PDF objects out of 1000 (max. 8388607)
  74 named destinations out of 1000 (max. 500000)
