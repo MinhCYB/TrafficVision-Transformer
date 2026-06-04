@@ -61,6 +61,8 @@ def get_train_config():
     # Checkpoint
     parser.add_argument("--checkpoint-path", type=str,
                         default="./experiments_andt_ADrone_STE_TTE/checkpoints/best.pth")
+    parser.add_argument("--save-dir", type=str, default=None,
+                        help="Thư mục gốc lưu checkpoint/result. Mặc định dùng ./experiments/")
 
     # Anomaly detection specific
     parser.add_argument("--anomaly-threshold", type=float, default=None,
