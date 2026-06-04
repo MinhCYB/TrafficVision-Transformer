@@ -1,0 +1,73 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% TrafficVision-Transformer final paper
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[a4paper, 10pt, conference]{ieeeconf}
+
+\IEEEoverridecommandlockouts
+\overrideIEEEmargins
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{url}
+\usepackage{verbatim}
+\usepackage[utf8]{inputenc}
+\usepackage[T5]{fontenc}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\setlength{\parskip}{0pt}
+\setlength{\parindent}{1em}
+
+\makeatletter
+\newcommand{\rom}[1]{\romannumeral #1}
+\newcommand{\Rom}[1]{\expandafter\@slowromancap\romannumeral #1@}
+\makeatother
+
+\pagestyle{plain}
+
+\title{\LARGE \bf
+TrafficVision-Transformer: Tái hiện có điều chỉnh kiến trúc Spatio-Temporal Transformer nhẹ cho phát hiện bất thường giao thông trong video từ thiết bị bay không người lái
+}
+
+\author{Vũ Hoàng Diệu Linh, Đặng Quang Minh, Lê Hồng Phương Chi% <-this % stops a space
+\\ Viện Trí tuệ nhân tạo \\
+Trường Đại học Công nghệ -- Đại học Quốc gia Hà Nội \\
+144 Xuân Thủy, Cầu Giấy, Hà Nội, Việt Nam \\
+{\tt\small\{24022387, 24022397, 24022270\}@vnu.edu.vn} \\ \\
+}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{plain}
+\pagestyle{plain}
+
+\begin{abstract}
+Phát hiện bất thường giao thông trong video quay từ thiết bị bay không người lái là một bài toán khó do camera chuyển động, phương tiện có kích thước nhỏ, mật độ giao thông thay đổi liên tục và dữ liệu bất thường chỉ chiếm tỷ lệ rất nhỏ. Các kiến trúc Video Transformer có khả năng khai thác quan hệ không gian - thời gian tốt, nhưng chi phí huấn luyện lớn khiến việc triển khai trong môi trường tính toán hạn chế trở nên khó khăn. Bài báo này trình bày TrafficVision-Transformer, một nghiên cứu tái hiện có điều chỉnh từ hướng Spatio-Temporal Transformer cho phát hiện bất thường giao thông theo chiến lược học không giám sát. Thay vì tuyên bố một mô hình quy mô lớn mới, nhóm tập trung vào câu hỏi thực tiễn hơn: làm thế nào giữ được ý tưởng dự đoán khung hình tương lai nhưng giảm chi phí để có thể kiểm chứng trong phạm vi tài nguyên sinh viên. Mô hình sử dụng bốn khung hình quá khứ để dự đoán khung hình kế tiếp; sau đó dùng sai số tái tạo MSE giữa khung hình dự đoán và khung hình thật làm điểm bất thường. Điểm điều chỉnh chính là Spatial Token Bottleneck: mỗi khung hình chỉ được biểu diễn bởi một token không gian trước khi đưa vào Temporal Transformer Encoder nông. Thiết kế này giữ được ý nghĩa học chuyển động theo thời gian nhưng giảm số token cần attention, phù hợp với điều kiện thực nghiệm trên Google Colab. Bài báo trình bày đầy đủ pipeline dữ liệu, kiến trúc, hàm mất mát, cách đánh giá bằng AUC-ROC và phân tích giới hạn thực nghiệm khi không huấn luyện toàn bộ mô hình ở quy mô lớn.
+\end{abstract}
+
+\begin{keywords}
+Phát hiện bất thường, Video Transformer, Spatio-Temporal Attention, Future Frame Prediction, UIT-ADrone, Giao thông thông minh.
+\end{keywords}
+
+\input{modau}
+\input{nghiencuulienquan}
+\input{phuongphapdexuat}
+\input{thucnghiemdanhgia}
+\input{ketluan}
+\input{tailieuthamkhao}
+
+\newpage
+\onecolumn
+\input{phuluc}
+
+\end{document}

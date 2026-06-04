@@ -1,0 +1,29 @@
+\section{NGHIÊN CỨU LIÊN QUAN}
+
+\subsection{Phát hiện bất thường trong video}
+
+Phát hiện bất thường trong video là bài toán xác định các khung hình hoặc đoạn video có hành vi khác biệt so với quy luật thông thường. Trong giao thông, bất thường có thể là va chạm, xe đi sai làn, phương tiện dừng đột ngột, người đi bộ băng qua vùng nguy hiểm hoặc chuyển động không phù hợp với luồng giao thông. Điểm khó của bài toán là sự kiện bất thường thường hiếm, ngắn và khó định nghĩa đầy đủ bằng một danh sách nhãn cố định.
+
+Các phương pháp truyền thống thường dựa trên đặc trưng thủ công, optical flow, mô hình nền hoặc quỹ đạo đối tượng. Những phương pháp này có ưu điểm là dễ giải thích và ít tốn tài nguyên, nhưng kém ổn định khi camera chuyển động hoặc cảnh giao thông quá đông. Các phương pháp học sâu cải thiện khả năng biểu diễn bằng CNN, LSTM, AutoEncoder hoặc GAN, tuy nhiên nhiều mô hình vẫn gặp khó khăn khi cần học quan hệ thời gian dài giữa các khung hình.
+
+\subsection{Dự đoán khung hình tương lai}
+
+Future Frame Prediction là một hướng tiếp cận phổ biến cho phát hiện bất thường không giám sát \cite{c8}. Thay vì học trực tiếp nhãn bất thường, mô hình học cách dự đoán khung hình tiếp theo từ các khung hình bình thường trong quá khứ. Gọi $X_{t-4:t-1}$ là chuỗi đầu vào và $X_t$ là khung hình thật tại thời điểm $t$, mô hình sinh $\hat{X}_t$ và tính điểm bất thường:
+\begin{equation}
+s_t = \frac{1}{CHW}\left\|X_t - \hat{X}_t\right\|_2^2.
+\end{equation}
+Khi $s_t$ lớn, khung hình được xem là có khả năng bất thường cao. Ưu điểm của hướng này là không cần nhãn bất thường trong huấn luyện. Hạn chế là sai số tái tạo có thể bị ảnh hưởng bởi rung camera, thay đổi ánh sáng hoặc chuyển động nền.
+
+\subsection{Video Transformer và Spatio-Temporal Attention}
+
+TimeSformer \cite{c1}, ViViT \cite{c2} và Video Swin Transformer \cite{c9} cho thấy Transformer có khả năng học biểu diễn video mạnh nhờ cơ chế attention. Với video, attention có thể được áp dụng theo không gian, theo thời gian hoặc kết hợp cả hai. Attention toàn phần trên mọi patch token cho khả năng biểu diễn cao nhưng chi phí tính toán tăng nhanh theo số frame và số patch.
+
+Một hướng tối ưu là tách mã hóa không gian và thời gian. Spatial Encoder trích xuất đặc trưng từng frame, sau đó Temporal Encoder học quan hệ giữa các frame. Cách tách này phù hợp với bài toán giao thông drone vì cho phép giảm số token xử lý ở nhánh thời gian mà vẫn giữ thông tin chuyển động quan trọng.
+
+\subsection{Bộ dữ liệu video drone giao thông}
+
+UIT-ADrone \cite{c11} là bộ dữ liệu video giao thông từ thiết bị bay không người lái, được xây dựng cho bài toán phát hiện bất thường trong video trên không. Bộ dữ liệu chứa nhiều cảnh giao thông thực tế tại đô thị, có nhãn bất thường ở mức khung hình cho tập kiểm tra. Đây là bộ dữ liệu phù hợp để đánh giá các phương pháp phát hiện bất thường không giám sát vì mô hình có thể huấn luyện trên dữ liệu bình thường và đánh giá bằng AUC-ROC trên nhãn frame-level.
+
+\subsection{Vị trí của phương pháp trong bài báo}
+
+Phương pháp của nhóm kế thừa tinh thần của các nghiên cứu dùng Transformer cho phát hiện bất thường trong video \cite{c3,c10,c12}, nhưng tập trung vào bài toán triển khai trong điều kiện tính toán hạn chế. Thay vì mở rộng mô hình theo hướng lớn hơn, TrafficVision-Transformer giảm số token thời gian bằng Spatial Token Bottleneck và dùng Temporal Transformer Encoder nông. Do đó, đóng góp không nằm ở việc tuyên bố đạt hiệu năng tốt hơn các công trình quy mô lớn, mà nằm ở việc chuyển một hướng nghiên cứu nặng về tính toán thành một prototype có thể phân tích, chạy kiểm chứng từng phần và mở rộng dần khi có tài nguyên tốt hơn.

@@ -1,0 +1,83 @@
+\section{THỰC NGHIỆM ĐÁNH GIÁ}
+
+\subsection{Môi trường và dữ liệu}
+
+Thực nghiệm được thiết kế cho bộ dữ liệu UIT-ADrone \cite{c11}. Tập huấn luyện chỉ sử dụng các frame bình thường. Tập kiểm tra dùng nhãn ở mức khung hình để tính AUC-ROC. Do giới hạn tài nguyên, nhóm ưu tiên kiểm chứng pipeline và phân tích khả thi thay vì huấn luyện full-scale trên toàn bộ dữ liệu trong thời gian dài.
+
+Mã nguồn được tổ chức thành các thư mục chính:
+\begin{itemize}
+    \item \texttt{data}: xử lý dữ liệu và tạo chuỗi frame.
+    \item \texttt{models}: cài đặt các biến thể Vision Transformer.
+    \item \texttt{configs}: khai báo tham số huấn luyện và kiến trúc.
+    \item \texttt{scripts}: train, inference và lưu checkpoint.
+    \item \texttt{results}: tính AUC và trực quan hóa ROC.
+\end{itemize}
+
+\subsection{Cấu hình thực nghiệm}
+
+Bảng \ref{tab:config} trình bày cấu hình chính được sử dụng trong project.
+
+\begin{table}[h]
+\centering
+\caption{Cấu hình thực nghiệm chính}
+\label{tab:config}
+\begin{tabular}{ll}
+\hline
+\textbf{Thành phần} & \textbf{Giá trị} \\
+\hline
+Số frame đầu vào & 4 \\
+Số frame dự đoán & 1 \\
+Kích thước ảnh encoder & 224 / 256 / 384 \\
+Kích thước ảnh target & $256 \times 256$ \\
+Kiến trúc không gian & ViT-base patch32 \\
+Temporal Encoder & Transformer nông \\
+Batch size mặc định & 8 \\
+Optimizer & SGD momentum 0.9 \\
+Learning rate & $10^{-4}$ \\
+Loss & MSE reconstruction \\
+Metric & AUC-ROC frame-level \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Quy trình đánh giá}
+
+Sau khi huấn luyện, mô hình chạy inference trên từng video kiểm tra. Với mỗi sample, mô hình sinh điểm bất thường $s_t$. Các điểm số này được lưu dưới dạng file \texttt{.npy}. Sau đó, script tính AUC so sánh chuỗi điểm dự đoán với nhãn frame-level tương ứng. AUC-ROC được chọn vì không phụ thuộc vào một ngưỡng cố định và phù hợp với bài toán dữ liệu mất cân bằng.
+
+Quy trình đánh giá gồm:
+\begin{enumerate}
+    \item Tải checkpoint tốt nhất của mô hình.
+    \item Duyệt từng scene trong tập kiểm tra.
+    \item Tính MSE reconstruction cho từng frame dự đoán.
+    \item Lưu chuỗi anomaly score.
+    \item Tính AUC-ROC bằng nhãn \texttt{test\_frame\_mask}.
+\end{enumerate}
+
+\subsection{Baseline so sánh}
+
+Project giữ thêm một baseline CA để so sánh về mặt kiến trúc. Baseline này cũng dùng hướng dự đoán khung hình tương lai, nhưng cách kết hợp đặc trưng không gian - thời gian khác với TrafficVision-Transformer. Mục tiêu của baseline là cung cấp điểm đối chiếu khi có đủ tài nguyên huấn luyện, không phải khẳng định kết quả vượt trội khi chưa chạy đầy đủ.
+
+\subsection{Phân tích chi phí tính toán}
+
+Huấn luyện mô hình video trên UIT-ADrone tốn nhiều thời gian vì mỗi sample gồm nhiều frame và mỗi frame phải đi qua Vision Transformer. Khi dùng ảnh $384 \times 384$, batch size 8 và hàng chục nghìn bước huấn luyện, Google Colab free hoặc GPU T4 thường không đủ thuận lợi để tái lập đầy đủ kết quả công bố. Ngoài ra, nếu frame được đọc trực tiếp từ Google Drive, tốc độ I/O có thể trở thành nút nghẽn lớn hơn cả tốc độ GPU.
+
+Thiết kế Spatial Token Bottleneck giúp giảm chi phí ở Temporal Encoder. Thay vì xử lý mọi patch token của bốn frame, mô hình chỉ xử lý bốn token đại diện cộng với một token \texttt{[CLS]}. Nhờ vậy, nhánh thời gian nhẹ hơn và có thể kiểm chứng forward pass, loss, checkpoint và inference trong phạm vi bài tập lớn.
+
+\subsection{Kết quả kiểm chứng pipeline}
+
+Do chưa huấn luyện full-scale đến khi hội tụ, bài báo không trình bày AUC như một kết quả so sánh cuối cùng. Đây là lựa chọn có chủ đích để tránh báo cáo một con số thiếu ổn định. Thay vào đó, nhóm kiểm chứng các điểm sau:
+\begin{itemize}
+    \item Data Loader tạo đúng sample gồm bốn frame đầu vào và một frame mục tiêu.
+    \item Mô hình nhận tensor dạng $(B,T,C,H,W)$ và sinh ảnh tái tạo dạng $(B,3,256,256)$.
+    \item Hàm mất mát MSE được tính giữa frame target và frame dự đoán.
+    \item Checkpoint có thể lưu, resume và dùng cho inference.
+    \item Chuỗi anomaly score có thể lưu thành \texttt{.npy} và đưa vào script tính AUC.
+\end{itemize}
+
+Vì vậy, kết quả của bài được hiểu là kết quả prototype: chứng minh pipeline và biến thể kiến trúc hoạt động đúng về mặt kỹ thuật. Khi có GPU mạnh hơn và thời gian huấn luyện dài hơn, cùng pipeline này có thể được dùng để báo cáo AUC-ROC đầy đủ trên toàn bộ tập kiểm tra.
+
+\subsection{Thảo luận}
+
+Điểm mạnh của phương pháp là cách tiếp cận đơn giản, dễ giải thích và phù hợp với học không giám sát. MSE reconstruction trực quan: mô hình càng khó dự đoán frame tương lai thì khả năng bất thường càng cao. Tuy nhiên, phương pháp cũng có hạn chế. Sai số MSE toàn ảnh có thể tăng do thay đổi ánh sáng, rung camera hoặc chuyển động nền, không chỉ do sự kiện bất thường. Ngoài ra, việc dùng một token đại diện cho mỗi frame có thể làm mất chi tiết của các phương tiện rất nhỏ.
+
+Các cải tiến tiềm năng gồm: dùng pretrained ViT để giảm thời gian hội tụ, fine-tuning một phần encoder thay vì huấn luyện toàn bộ, thêm optical flow để nhấn mạnh chuyển động, hoặc dùng score smoothing theo thời gian để giảm nhiễu trên từng frame đơn lẻ.

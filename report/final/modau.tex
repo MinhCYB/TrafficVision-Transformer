@@ -1,0 +1,23 @@
+\section{MỞ ĐẦU}
+
+Trong những năm gần đây, các hệ thống giám sát giao thông thông minh ngày càng phụ thuộc vào dữ liệu video. Bên cạnh camera cố định, thiết bị bay không người lái cung cấp góc nhìn rộng, linh hoạt và phù hợp với các khu vực giao thông phức tạp như vòng xoay, ngã tư, đường đông phương tiện hoặc các sự kiện ngoài trời. Tuy nhiên, video từ góc nhìn trên cao cũng tạo ra nhiều thách thức: camera thường xuyên chuyển động, phương tiện có kích thước nhỏ, mật độ giao thông biến thiên mạnh và các sự kiện bất thường xuất hiện trong thời gian ngắn.
+
+Phát hiện bất thường trong video giao thông có thể được tiếp cận theo hai hướng chính. Hướng có giám sát yêu cầu nhãn chi tiết cho từng loại vi phạm hoặc từng khung hình bất thường. Cách này có thể đạt độ chính xác cao khi dữ liệu nhãn đầy đủ, nhưng khó mở rộng vì các tình huống bất thường trong thực tế rất đa dạng. Hướng học không giám sát chỉ học từ dữ liệu bình thường, sau đó xem các mẫu lệch khỏi quy luật bình thường là bất thường. Hướng này phù hợp hơn với bài toán giao thông vì video bình thường dễ thu thập hơn rất nhiều so với video có sự cố.
+
+Trong bài báo này, nhóm tập trung vào chiến lược dự đoán khung hình tương lai. Mô hình nhận một chuỗi ngắn gồm bốn khung hình quá khứ và dự đoán khung hình kế tiếp. Nếu cảnh giao thông diễn ra bình thường, mô hình có khả năng tái tạo khung hình tiếp theo với sai số nhỏ. Ngược lại, khi xuất hiện va chạm, chuyển động bất thường hoặc hành vi không theo quy luật đã học, sai số tái tạo tăng lên và được dùng làm điểm bất thường.
+
+Transformer là một kiến trúc mạnh cho hiểu video nhờ khả năng mô hình hóa quan hệ xa giữa các vùng ảnh và giữa các khung hình. Dù vậy, attention trên toàn bộ token không gian - thời gian có chi phí lớn, đặc biệt khi xử lý chuỗi video độ phân giải cao. Đối với một bài tập lớn trong phạm vi học phần seminar, việc tái huấn luyện đầy đủ một mô hình Video Transformer quy mô lớn trên toàn bộ dữ liệu drone là không thực tế. Vì vậy, nhóm đề xuất một biến thể nhẹ hơn, đặt trọng tâm vào khả năng giải thích, khả năng kiểm chứng pipeline và khả năng triển khai trên tài nguyên phổ thông.
+
+\subsection{Định vị đóng góp và tính mới}
+
+Bài báo này không định vị đóng góp theo hướng phát minh lại toàn bộ nguyên lý Spatio-Temporal Transformer. Thay vào đó, nhóm định vị công việc như một nghiên cứu tái hiện có điều chỉnh: kế thừa ý tưởng học không giám sát bằng dự đoán khung hình tương lai, sau đó thiết kế lại pipeline và kiến trúc theo ràng buộc tính toán thực tế của nhóm sinh viên. Tính mới của bài nằm ở cách đặt bài toán và cách điều chỉnh kỹ thuật cho điều kiện tài nguyên thấp, cụ thể là giảm số token thời gian, dùng encoder nông và xây dựng quy trình kiểm chứng end-to-end thay vì chỉ mô tả lý thuyết.
+
+Đóng góp chính của bài báo gồm:
+\begin{itemize}
+    \item Tái hiện có điều chỉnh hướng Spatio-Temporal Transformer cho phát hiện bất thường giao thông trong video drone theo chiến lược học không giám sát.
+    \item Đề xuất cách nhẹ hóa bằng Spatial Token Bottleneck để giảm số token đưa vào Temporal Transformer Encoder: mỗi khung hình chỉ giữ một token đại diện cho đặc trưng không gian.
+    \item Xây dựng pipeline đầy đủ gồm đọc chuỗi frame, mã hóa không gian, mã hóa thời gian, tái tạo khung hình tương lai, tính MSE anomaly score và chuẩn bị luồng đánh giá bằng AUC-ROC.
+    \item Phân tích tính khả thi của mô hình trong môi trường tài nguyên hạn chế, qua đó chỉ ra vì sao full-scale training không phải mục tiêu phù hợp trong phạm vi seminar.
+\end{itemize}
+
+Phần còn lại của bài báo được tổ chức như sau. Phần II trình bày các nghiên cứu liên quan. Phần III mô tả phương pháp đề xuất. Phần IV trình bày thiết lập thực nghiệm và phân tích khả thi. Phần V đưa ra kết luận và hướng phát triển.

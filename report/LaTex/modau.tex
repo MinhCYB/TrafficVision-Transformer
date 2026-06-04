@@ -1,0 +1,11 @@
+\section{MỞ ĐẦU}
+
+Trong bối cảnh đô thị hóa nhanh chóng, việc quản lý an toàn giao thông trở thành một thách thức lớn đối với các đô thị thông minh. Hệ thống camera an ninh được lắp đặt dày đặc tạo ra một lượng dữ liệu video khổng lồ, vượt quá khả năng giám sát thủ công của con người. Do đó, nhu cầu về các giải pháp tự động nhận diện hành vi vi phạm giao thông với độ chính xác và tốc độ xử lý cao đã trở nên cấp thiết hơn bao giờ hết.
+
+Nhận diện hành vi trong video là một bài toán khó trong thị giác máy tính do đòi hỏi sự kết hợp chặt chẽ giữa đặc trưng không gian và động lực học thời gian. Trước đây, các mạng tích chập (CNN) thường được sử dụng nhưng còn hạn chế trong việc nắm bắt các mối liên hệ xa giữa các khung hình. Sự xuất hiện của kiến trúc Transformer, tiêu biểu là các nghiên cứu về cơ chế chú ý không - thời gian \cite{c1} và các biến thể mô hình video \cite{c2, c9}, đã mở ra hướng đi mới đầy triển vọng. Các kiến trúc này cho phép mô hình tập trung vào những vùng ảnh và phân đoạn thời gian quan trọng nhất, từ đó cải thiện đáng kể khả năng hiểu nội dung video.
+
+Tuy nhiên, việc áp dụng Transformer vào nhận diện vi phạm giao thông thực tế vẫn đối mặt với hai thách thức lớn: (1) Khối lượng tính toán cực lớn từ dữ liệu video độ phân giải cao và (2) Sự phức tạp của các hành vi vi phạm trong môi trường giao thông hỗn hợp. Mặc dù đã có nhiều nghiên cứu về phát hiện bất thường trong video \cite{c3, c4, c10} cũng như các kiến trúc tối ưu hóa hiệu năng và chú ý đặc thù \cite{c5, c7, c8}, việc xây dựng một hệ thống chuyên biệt cho giám sát giao thông \cite{c6} vẫn cần được nghiên cứu sâu hơn để cân bằng giữa độ chính xác và khả năng triển khai thực tế.
+
+Trong bài báo này, chúng tôi đề xuất ứng dụng cơ chế Chú ý không - thời gian (Spatio-Temporal Attention) trong Video Transformer để nhận diện các hành vi vi phạm giao thông từ camera an ninh. Nghiên cứu tập trung vào việc khai thác các đặc trưng chuyển động then chốt của phương tiện, đồng thời đánh giá hiệu năng của mô hình so với các phương pháp truyền thống nhằm hướng tới một giải pháp giám sát tự động hóa và hiệu quả.
+
+% Cấu trúc bài báo gồm: Phần II trình bày các nghiên cứu liên quan; Phần III mô tả phương pháp đề xuất; Phần IV báo cáo kết quả thực nghiệm và Phần V là kết luận.

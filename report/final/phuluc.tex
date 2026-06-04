@@ -1,0 +1,68 @@
+\section*{PHỤ LỤC}
+
+\subsection*{1. Cấu trúc mã nguồn}
+
+Project được tổ chức theo hướng tách rõ dữ liệu, mô hình, huấn luyện và đánh giá:
+
+\begin{itemize}
+    \item \texttt{configs/train\_config.py}: khai báo tham số thực nghiệm như batch size, learning rate, image size, số epoch và checkpoint.
+    \item \texttt{data/dataset.py}: đọc frame, resize ảnh, chuẩn hóa và tạo sample gồm năm frame liên tiếp.
+    \item \texttt{models/vit\_ste\_tte.py}: cài đặt TrafficVision-Transformer với Spatial Transformer Encoder, Temporal Transformer Encoder và Decoder.
+    \item \texttt{models/vit\_baseline\_ca.py}: baseline dùng để đối chiếu kiến trúc.
+    \item \texttt{scripts/train\_ste\_tte.py}: train, validation, resume checkpoint và inference cho mô hình đề xuất.
+    \item \texttt{compute\_auc.py}: tính AUC-ROC từ các file anomaly score và nhãn frame-level.
+\end{itemize}
+
+\subsection*{2. Lệnh huấn luyện tham khảo}
+
+\begin{verbatim}
+python scripts/train_ste_tte.py \
+    --train 1 \
+    --epochs 5 \
+    --batch-size 8 \
+    --lr 1e-4 \
+    --model-arch b16 \
+    --image-size 384 \
+    --data-dir ../../UIT-ADrone
+\end{verbatim}
+
+Trong điều kiện Colab giới hạn, có thể giảm chi phí bằng cách dùng \texttt{--image-size 224}, giảm \texttt{--batch-size}, giảm số epoch hoặc chỉ chạy trên một phần nhỏ dữ liệu để kiểm chứng pipeline.
+
+\subsection*{3. Lệnh inference và tính AUC}
+
+\begin{verbatim}
+python scripts/train_ste_tte.py \
+    --train 0 \
+    --data-dir ../../UIT-ADrone
+
+python compute_auc.py \
+    --scores-dir experiments_andt_ADrone_STE_TTE/ \
+    --labels-dir ../../UIT-ADrone/test/test_frame_mask/ \
+    --plot \
+    --save-plot results/roc_ste_tte.png
+\end{verbatim}
+
+\subsection*{4. Phân công công việc}
+
+\begin{center}
+\begin{tabular}{|p{3.2cm}|p{6.2cm}|p{3.2cm}|}
+\hline
+\textbf{Thành viên} & \textbf{Nhiệm vụ} & \textbf{Sản phẩm} \\
+\hline
+Đặng Quang Minh & Tiền xử lý dữ liệu, kiểm tra DataLoader, viết phần đánh giá và AUC & Module dữ liệu và AUC \\
+\hline
+Vũ Hoàng Diệu Linh & Cài đặt và phân tích mô hình STE-TTE nhẹ, kiểm tra forward pass và checkpoint & Module STE-TTE và train script \\
+\hline
+Lê Hồng Phương Chi & Baseline, tổng hợp kết quả, viết báo cáo và slide & Baseline và phần kết quả \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection*{5. Ghi chú thực nghiệm}
+
+Do mô hình video Transformer có chi phí lớn, kết quả cuối cùng cần được hiểu theo hai mức:
+
+\begin{itemize}
+    \item \textbf{Mức kiểm chứng pipeline}: đảm bảo dữ liệu, mô hình, loss, checkpoint và inference hoạt động đúng.
+    \item \textbf{Mức thực nghiệm đầy đủ}: cần GPU mạnh hơn, dữ liệu được lưu cục bộ nhanh hơn và thời gian train dài hơn để báo cáo AUC ổn định.
+\end{itemize}

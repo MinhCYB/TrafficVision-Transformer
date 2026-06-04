@@ -1,0 +1,146 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%2345678901234567890123456789012345678901234567890123456789012345678901234567890
+%        1         2         3         4         5         6         7         8
+
+% \documentclass[letterpaper, 10 pt, conference]{ieeeconf}  % Comment this line out
+                                                          % if you need a4paper
+\documentclass[a4paper, 10pt, conference]{ieeeconf}      % Use this line for a4
+                                                          % paper
+
+\IEEEoverridecommandlockouts                              % This command is only
+                                                          % needed if you want to
+                                                          % use the \thanks command
+\overrideIEEEmargins
+% See the \addtolength command later in the file to balance the column lengths
+% on the last page of the document
+
+
+
+% The following packages can be found on http:\\www.ctan.org
+\usepackage{graphics} % for pdf, bitmapped graphics files
+\usepackage{epsfig} % for postscript graphics files
+%\usepackage{mathptmx} % assumes new font selection scheme installed
+%\usepackage{times} % assumes new font selection scheme installed
+\usepackage{amsmath} % assumes amsmath package installed
+\usepackage{amssymb}  % assumes amsmath package installed
+
+\usepackage{url}
+\usepackage[ruled, vlined, linesnumbered]{algorithm2e}
+%\usepackage{algorithm}
+\usepackage{verbatim} 
+%\usepackage[noend]{algpseudocode}
+\usepackage{soul, color}
+\usepackage{lmodern}
+\usepackage{fancyhdr}
+\usepackage[utf8]{inputenc}
+\usepackage{fourier} 
+\usepackage{array}
+\usepackage{makecell}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T5]{fontenc} 
+\usepackage{lmodern}     
+\usepackage[table]{xcolor} 
+\usepackage[vietnamese]{babel}
+\usepackage{setspace}
+\singlespacing 
+\setlength{\parskip}{0pt} 
+\setlength{\parindent}{1em}
+\let\labelindent\relax
+\usepackage{enumitem}
+\newcommand{\subparagraph}{}
+\usepackage{titlesec}
+\SetNlSty{large}{}{:}
+\usepackage{array}
+
+
+\renewcommand\theadalign{bc}
+\renewcommand\theadfont{\bfseries}
+\renewcommand\theadgape{\Gape[4pt]}
+\renewcommand\cellgape{\Gape[4pt]}
+
+\newcommand{\rework}[1]{\todo[color=yellow,inline]{#1}}
+
+\makeatletter
+\newcommand{\rom}[1]{\romannumeral #1}
+\newcommand{\Rom}[1]{\expandafter\@slowromancap\romannumeral #1@}
+\makeatother
+
+\pagestyle{plain} 
+
+
+
+\title{\LARGE \bf
+Spatio-Temporal Attention (Chú ý không - thời gian) trong Video Transformer ứng dụng cho nhận diện hành vi vi phạm giao thông trong hệ thống camera an ninh.
+}
+
+%\author{ \parbox{3 in}{\centering Huibert Kwakernaak*
+%         \thanks{*Use the $\backslash$thanks command to put information here}\\
+%         Faculty of Electrical Engineering, Mathematics and Computer Science\\
+%         University of Twente\\
+%         7500 AE Enschede, The Netherlands\\
+%         {\tt\small h.kwakernaak@autsubmit.com}}
+%         \hspace*{ 0.5 in}
+%         \parbox{3 in}{ \centering Pradeep Misra**
+%         \thanks{**The footnote marks may be inserted manually}\\
+%        Department of Electrical Engineering \\
+%         Wright State University\\
+%         Dayton, OH 45435, USA\\
+%         {\tt\small pmisra@cs.wright.edu}}
+%}
+
+\author{Vũ Hoàng Diệu Linh, Đặng Quang Minh, Lê Hồng Phương Chi% <-this % stops a space 
+\\ Viện Trí tuệ nhân tạo \\
+Trường Đại học Công nghệ -- Đại học Quốc gia Hà Nội \\
+144 Xuân Thủy, Cầu Giấy, Hà Nội, Việt Nam \\
+{\tt\small\{24022387, 24022397, 24022270\}@vnu.edu.vn} \\ \\
+% Dr. Geetha V%
+% \\ Department of Information Technology \\
+% National Institute of Technology Karnataka \\
+% Surathkal, Mangaluru 575025, Karnataka, India \\
+% {\tt\small geethav@nitk.edu.in}
+}
+
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,      % Màu đỏ cho [1], [2]
+    urlcolor=blue
+}
+
+
+\begin{document}
+
+
+
+\maketitle
+\thispagestyle{plain}
+\pagestyle{plain}
+
+
+
+\begin{abstract}
+
+Bài nghiên cứu này hướng tới việc khai thác các phương pháp hiệu quả để nhận diện hành vi vi phạm giao thông thông qua hệ thống camera an ninh. Trong lĩnh vực thị giác máy tính, việc nhận diện hành vi trong video đòi hỏi khả năng phân tích và dự đoán dựa trên sự tương tác phức tạp của các đối tượng trong cả không gian và thời gian. Trong bài báo này, việc xử lý khối lượng tính toán lớn từ dữ liệu video được giải quyết thông qua việc ứng dụng cơ chế Chú ý không - thời gian (Spatio-Temporal Attention) trong kiến trúc Video Transformer; cho phép mô hình tập trung vào các đặc trưng hình ảnh và chuỗi chuyển động quan trọng nhất của phương tiện. Bài báo cũng nhằm mục đích đánh giá hiệu năng và độ chính xác của mô hình đề xuất so với các thuật toán truyền thống khác trong việc giải quyết cùng một bài toán. Nghiên cứu này không chỉ đóng vai trò như một giải pháp thay thế tối ưu cho việc giám sát thủ công phức tạp mà còn đặc biệt hữu ích cho các hệ thống dữ liệu lớn (big data) đòi hỏi tốc độ xử lý nhanh và tự động hóa cao trong giao thông thông minh.\\
+
+\end{abstract}
+
+\begin{keywords}
+
+Chú ý không -- thời gian, Video Transformer, Nhận diện hành vi, Vi phạm giao thông, Camera an ninh, Giao thông thông minh.
+
+\end{keywords}
+
+\input{modau}
+\input{nghiencuulienquan}
+\input{phuongphapdexuat}
+\input{thucnghiemdanhgia}
+\input{ketluan}
+\input{tailieuthamkhao}
+
+\newpage
+\onecolumn
+\input{phuluc}
+
+\end{document}

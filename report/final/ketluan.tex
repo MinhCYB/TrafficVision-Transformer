@@ -1,0 +1,7 @@
+\section{KẾT LUẬN}
+
+Bài báo đã trình bày TrafficVision-Transformer, một nghiên cứu tái hiện có điều chỉnh từ hướng Spatio-Temporal Transformer cho phát hiện bất thường giao thông trong video drone. Phương pháp sử dụng chiến lược học không giám sát bằng dự đoán khung hình tương lai: mô hình học quy luật chuyển động bình thường từ bốn frame quá khứ và dùng sai số tái tạo frame kế tiếp làm điểm bất thường.
+
+Đóng góp chính của nhóm là thiết kế lại pipeline theo hướng gọn và có khả năng kiểm chứng trong điều kiện tài nguyên hạn chế. Spatial Token Bottleneck giúp giảm số token đưa vào Temporal Transformer Encoder, từ đó giảm chi phí tính toán nhưng vẫn giữ thông tin chuyển động theo thời gian. Do đó, tính mới của bài nằm ở hướng thích nghi mô hình cho bối cảnh tài nguyên thấp, không nằm ở việc tuyên bố một mô hình SOTA hoàn toàn mới. Bài báo cũng phân tích rõ giới hạn của việc huấn luyện full-scale trên Google Colab và đề xuất cách đánh giá trung thực bằng pipeline inference, anomaly score và AUC-ROC khi có checkpoint đủ tốt.
+
+Trong tương lai, nhóm sẽ tập trung vào ba hướng phát triển. Thứ nhất, sử dụng trọng số pretrained cho Spatial Transformer Encoder để rút ngắn thời gian hội tụ. Thứ hai, bổ sung cơ chế chọn vùng chuyển động hoặc vùng phương tiện để giảm ảnh hưởng của nền. Thứ ba, hoàn thiện thực nghiệm trên toàn bộ UIT-ADrone, so sánh với baseline CA và báo cáo đầy đủ AUC-ROC, EER, tốc độ suy luận và phân tích lỗi.
