@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (MiKTeX 25.3) (preloaded format=pdflatex 2025.6.19)  4 JUN 2026 22:05
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (MiKTeX 25.3) (preloaded format=pdflatex 2025.6.19)  5 JUN 2026 10:41
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -481,27 +481,27 @@ Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 4
 (C:\Program Files\MiKTeX\tex/latex/00miktex\epstopdf-sys.cfg
 File: epstopdf-sys.cfg 2021/03/18 v2.0 Configuration of epstopdf for MiKTeX
 ))
-LaTeX Font Info:    Trying to load font information for U+msa on input line 77.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 78.
 
 
 (C:\Program Files\MiKTeX\tex/latex/amsfonts\umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 77.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 78.
 
 
 (C:\Program Files\MiKTeX\tex/latex/amsfonts\umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
 LaTeX Font Info:    Font shape `OT1/cmss/m/it' in size <10> not available
-(Font)              Font shape `OT1/cmss/m/sl' tried instead on input line 91.
+(Font)              Font shape `OT1/cmss/m/sl' tried instead on input line 92.
 
 
 [1
 
 
 Non-PDF special ignored!
-<special> papersize=711.20656pt,268.70653pt
+<special> papersize=739.6593pt,268.70653pt
 {C:/Users/ADMIN/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}]
 (D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVision-Transformer\re
 port\final\figures\pipeline_figure.aux)
@@ -511,13 +511,13 @@ L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 14427 strings out of 473523
- 290656 string characters out of 5724697
- 692429 words of memory out of 5000000
- 37398 multiletter control sequences out of 15000+600000
+ 14439 strings out of 473523
+ 290870 string characters out of 5724697
+ 713310 words of memory out of 5000000
+ 37410 multiletter control sequences out of 15000+600000
  568888 words of font info for 75 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 102i,7n,107p,523b,824s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 102i,7n,107p,523b,861s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <C:/Program Files/MiKTeX/fonts/type1/public/amsfonts/cm/cmex10.pfb><C:/Progra
 m Files/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi10.pfb><C:/Program Files/MiKT
 eX/fonts/type1/public/amsfonts/cm/cmmi12.pfb><C:/Program Files/MiKTeX/fonts/typ
@@ -539,7 +539,7 @@ iles/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy8.pfb><C:/Program Files/MiKTeX/f
 onts/type1/public/amsfonts/cm/cmsy9.pfb><C:/Program Files/MiKTeX/fonts/type1/pu
 blic/amsfonts/symbols/msbm10.pfb>
 Output written on "D:\main\Full\documents\uni\Nam 2\Ky 2\seminar\btl\TrafficVis
-ion-Transformer\report\final\figures\pipeline_figure.pdf" (1 page, 224773 bytes
+ion-Transformer\report\final\figures\pipeline_figure.pdf" (1 page, 226822 bytes
 ).
 PDF statistics:
  124 PDF objects out of 1000 (max. 8388607)

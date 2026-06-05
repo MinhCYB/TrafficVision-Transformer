@@ -56,12 +56,13 @@
 % Coordinates
 \coordinate (inputC) at (0, 3.15);
 \coordinate (steC) at (4.65, 3.15);
-\coordinate (tokC) at (8.65, 3.15);
-\coordinate (botC) at (11.45, 3.15);
-\coordinate (tteC) at (15.95, 3.15);
-\coordinate (decC) at (20.80, 3.15);
-\coordinate (targetC) at (14.25, -2.25);
-\coordinate (scoreC) at (20.80, -2.25);
+\coordinate (tokC) at (8.20, 3.15);
+\coordinate (botC) at (10.95, 3.15);
+\coordinate (outTokC) at (13.55, 3.15);
+\coordinate (tteC) at (16.95, 3.15);
+\coordinate (decC) at (21.80, 3.15);
+\coordinate (targetC) at (15.25, -2.25);
+\coordinate (scoreC) at (21.80, -2.25);
 
 % ---------------------------------------------------------------------
 % Input clip
@@ -95,13 +96,14 @@
 \draw[innerarrow] (ste3.south) -- (ste4.north);
 
 % ---------------------------------------------------------------------
-% Spatial CLS tokens
+% Spatial tokens before bottleneck
 % ---------------------------------------------------------------------
-\node[smallnote] at ($(tokC)+(0,1.30)$) {Spatial\\CLS tokens};
-\node[token] (z1) at ($(tokC)+(0,0.72)$) {$z_1$};
-\node[token] (z2) at ($(tokC)+(0,0.00)$) {$z_2$};
-\node[token] (z3) at ($(tokC)+(0,-0.72)$) {$z_3$};
-\node[token] (z4) at ($(tokC)+(0,-1.44)$) {$z_4$};
+\node[smallnote] at ($(tokC)+(0,1.18)$) {Spatial tokens\\per frame};
+\foreach \r/\y in {1/0.62,2/-0.08,3/-0.78,4/-1.48} {
+    \foreach \x in {-0.45,-0.15,0.15,0.45} {
+        \node[token, minimum width=0.27cm, minimum height=0.27cm, inner sep=0pt] at ($(tokC)+(\x,\y)$) {};
+    }
+}
 
 % ---------------------------------------------------------------------
 % Spatial Token Bottleneck
@@ -110,10 +112,19 @@
 \node[title, text=green!45!black] at ($(botC)+(0,1.32)$)
     {Spatial Token\\Bottleneck};
 \node[font=\sffamily\normalsize, text=black!68, align=center] at ($(botC)+(0,0.28)$)
-    {Keep \textbf{1 CLS token}\\per frame};
+    {Select \textbf{CLS token}\\from each frame};
 \node[font=\sffamily\normalsize, text=black!62] at ($(botC)+(0,-0.95)$)
     {$Z=[z_1,z_2,z_3,z_4]$};
 \node[note] at ($(botC)+(0,-1.45)$) {$\in \mathbb{R}^{4 \times 768}$};
+
+% ---------------------------------------------------------------------
+% Frame-level CLS tokens after bottleneck
+% ---------------------------------------------------------------------
+\node[smallnote] at ($(outTokC)+(0,1.30)$) {Frame-level\\CLS tokens};
+\node[token] (z1) at ($(outTokC)+(0,0.72)$) {$z_1$};
+\node[token] (z2) at ($(outTokC)+(0,0.00)$) {$z_2$};
+\node[token] (z3) at ($(outTokC)+(0,-0.72)$) {$z_3$};
+\node[token] (z4) at ($(outTokC)+(0,-1.44)$) {$z_4$};
 
 % ---------------------------------------------------------------------
 % Temporal Transformer Encoder
@@ -174,9 +185,10 @@
 % Main flow
 % ---------------------------------------------------------------------
 \draw[main] ($(inputC)+(1.55,0)$) -- (ste.west);
-\draw[main] (ste.east) -- (z2.west);
-\draw[main] (z2.east) -- (bot.west);
-\draw[main] (bot.east) -- (tte.west);
+\draw[main] (ste.east) -- ($(tokC)+(-0.75,0)$);
+\draw[main] ($(tokC)+(0.75,0)$) -- (bot.west);
+\draw[main] (bot.east) -- (z2.west);
+\draw[main] (z2.east) -- (tte.west);
 \draw[main] (tte.east) -- (dec.west);
 \draw[main] (dec.south) -- (score.north);
 
